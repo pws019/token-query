@@ -1,0 +1,3 @@
+{
+  "extends": "@token-query/config/tsconfig.base.json"
+}
