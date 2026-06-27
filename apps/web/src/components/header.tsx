@@ -3,7 +3,10 @@ import { NavLink } from "react-router";
 import { ModeToggle } from "./mode-toggle";
 
 export default function Header() {
-  const links = [{ to: "/", label: "Home" }] as const;
+  const links = [
+    { to: "/", label: "Home" },
+    { to: "/profile", label: "个人信息" },
+  ] as const;
 
   return (
     <div>
