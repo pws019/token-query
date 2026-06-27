@@ -1,0 +1,56 @@
+AWSTemplateFormatVersion: '2010-09-09'
+Transform: AWS::Serverless-2016-10-31
+Description: Token Query Server
+
+Parameters:
+  DatabaseUrl:
+    Type: String
+    NoEcho: true
+    Default: postgresql://placeholder:placeholder@localhost:5432/placeholder
+    Description: PostgreSQL connection string for the deployed Lambda function.
+  CorsOrigin:
+    Type: String
+    Default: http://localhost:5173
+    Description: Allowed frontend origin, for example https://your-frontend-domain.example.com.
+  NodeEnv:
+    Type: String
+    Default: production
+    AllowedValues:
+      - development
+      - production
+      - test
+
+Resources:
+  HonoApiFunction:
+    Type: AWS::Serverless::Function
+    Metadata:
+      BuildMethod: makefile
+    Properties:
+      CodeUri: .
+      Handler: lambda.handler
+      Runtime: nodejs20.x
+      Timeout: 20
+      MemorySize: 512
+      Architectures:
+        - arm64
+      Environment:
+        Variables:
+          DATABASE_URL: !Ref DatabaseUrl
+          CORS_ORIGIN: !Ref CorsOrigin
+          NODE_ENV: !Ref NodeEnv
+      Events:
+        Root:
+          Type: HttpApi
+          Properties:
+            Path: /
+            Method: ANY
+        Proxy:
+          Type: HttpApi
+          Properties:
+            Path: /{proxy+}
+            Method: ANY
+
+Outputs:
+  ApiUrl:
+    Description: API Gateway endpoint URL
+    Value: !Sub "https://${ServerlessHttpApi}.execute-api.${AWS::Region}.amazonaws.com/"

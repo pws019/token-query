@@ -52,3 +52,9 @@ coverage
 .cache
 tmp
 temp
+
+# aws
+.aws-sam
+
+# other
+.pnpm*

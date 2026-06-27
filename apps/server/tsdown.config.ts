@@ -8,5 +8,5 @@ export default defineConfig({
   format: "esm",
   outDir: "./dist",
   clean: true,
-  noExternal: [/@token-query\/.*/],
+  noExternal: [/.*/],
 });
