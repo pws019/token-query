@@ -45,6 +45,38 @@ pnpm run dev
 Open [http://localhost:5173](http://localhost:5173) in your browser to see the web application.
 The API is running at [http://localhost:3000](http://localhost:3000).
 
+## AWS Lambda Deployment
+
+The Hono server supports both local Node.js serving and AWS Lambda deployment.
+
+Build the server:
+
+```bash
+pnpm --filter server build
+```
+
+Build output:
+
+- `apps/server/dist/index.mjs`: local Node.js entry
+- `apps/server/dist/lambda.mjs`: AWS Lambda entry
+
+For AWS Lambda, set the handler to one of the following, depending on your zip layout:
+
+```text
+lambda.handler       # if apps/server/dist/* is the zip root
+dist/lambda.handler  # if the zip root contains the dist/ directory
+```
+
+Configure these Lambda environment variables:
+
+```text
+DATABASE_URL=postgresql://USER:PASSWORD@HOST:5432/DATABASE
+CORS_ORIGIN=https://your-frontend-domain.example.com
+NODE_ENV=production
+```
+
+Local development reads the same variable names from `apps/server/.env`. In AWS, do not upload `.env`; configure the values in Lambda environment variables or through your deployment tool. If the database is in a private VPC, attach the Lambda function to the same VPC/subnets/security groups, or use an RDS Proxy endpoint in `DATABASE_URL`.
+
 ## UI Customization
 
 React web apps in this stack share shadcn/ui primitives through `packages/ui`.
