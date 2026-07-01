@@ -4,5 +4,11 @@
   "assets": {
     "directory": "apps/web/build/client",
     "not_found_handling": "single-page-application"
-  }
+  },
+  "routes": [
+    {
+      "pattern": "abccba.site",
+      "custom_domain": true
+    }
+  ]
 }
