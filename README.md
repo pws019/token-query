@@ -84,6 +84,7 @@ The frontend is deployed by GitHub Actions to the existing `token-query` Worker 
 Configure these GitHub repository variables:
 
 ```text
+CLOUDFLARE_WORKER_ROUTE=your-frontend-domain.example.com/*
 VITE_SERVER_URL=https://your-api-domain.example.com
 ```
 
@@ -97,7 +98,7 @@ CLOUDFLARE_API_TOKEN=your-cloudflare-api-token
 Bind custom frontend domains to the `token-query` Worker in Cloudflare. The workflow uploads `apps/web/build/client` with:
 
 ```bash
-wrangler deploy --name=token-query --assets=apps/web/build/client
+wrangler deploy --name=token-query --assets=apps/web/build/client --route="$CLOUDFLARE_WORKER_ROUTE"
 ```
 
 ## UI Customization
