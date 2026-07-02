@@ -49,4 +49,5 @@ jobs:
           --name=token-query
           --compatibility-date=2026-07-01
           --assets=apps/web/build/client
+          --workers-dev=false
           --keep-vars

@@ -94,10 +94,10 @@ CLOUDFLARE_ACCOUNT_ID=your-cloudflare-account-id
 CLOUDFLARE_API_TOKEN=your-cloudflare-api-token
 ```
 
-Bind custom frontend domains to the `token-query` Worker in Cloudflare Dashboard. Keep that binding there; the GitHub workflow only uploads `apps/web/build/client` and does not create or update Worker routes.
+Bind custom frontend domains to the `token-query` Worker in Cloudflare Dashboard. Keep that binding there; the GitHub workflow only uploads `apps/web/build/client` and does not create or update Worker routes or a `workers.dev` subdomain.
 
 ```bash
-wrangler deploy --name=token-query --assets=apps/web/build/client
+wrangler deploy --name=token-query --assets=apps/web/build/client --workers-dev=false
 ```
 
 ## UI Customization
