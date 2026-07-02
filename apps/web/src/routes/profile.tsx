@@ -1,19 +1,21 @@
-import { Button, buttonVariants } from "@token-query/ui/components/button";
-import {
-  Card,
-  CardContent,
-  CardDescription,
-  CardHeader,
-  CardTitle,
-} from "@token-query/ui/components/card";
+import { Button } from "@token-query/ui/components/button";
 import { Input } from "@token-query/ui/components/input";
-import { Label } from "@token-query/ui/components/label";
-import { cn } from "@token-query/ui/lib/utils";
 import { env } from "@token-query/env/web";
-import { Trash2 } from "lucide-react";
+import {
+  AtSign,
+  BookOpen,
+  ExternalLink,
+  GitBranch,
+  IdCard,
+  KeyRound,
+  LoaderCircle,
+  ShieldCheck,
+  Trash2,
+  UserRound,
+  Users,
+} from "lucide-react";
 import type { ReactNode } from "react";
 import { useState } from "react";
-import { Link } from "react-router";
 
 import type { Route } from "./+types/profile";
 
@@ -101,116 +103,292 @@ export default function Profile() {
   const isBusy = isQuerying || isDeleting;
 
   return (
-    <main className="container mx-auto grid max-w-4xl gap-4 px-4 py-6">
-      <div className="flex flex-wrap items-center justify-between gap-3">
-        <div>
-          <h1 className="text-2xl font-semibold">个人信息</h1>
-          <p className="mt-1 text-sm text-muted-foreground">
-            输入 GitHub Token，查询当前账户并保存到数据库。
-          </p>
-        </div>
-        <Link className={cn(buttonVariants({ variant: "outline" }))} to="/">
-          返回首页
-        </Link>
-      </div>
-
-      <Card>
-        <CardHeader>
-          <CardTitle>GitHub Token</CardTitle>
-          <CardDescription>Token 只用于本次查询，不会保存到数据库。</CardDescription>
-        </CardHeader>
-        <CardContent>
-          <div className="grid gap-3">
-            <div className="grid gap-2">
-              <Label htmlFor="github-token">GitHub Token</Label>
-              <Input
-                id="github-token"
-                type="password"
-                value={token}
-                placeholder="请输入 GitHub Token"
-                autoComplete="off"
-                onChange={(event) => setToken(event.target.value)}
-              />
-            </div>
-            <div className="flex flex-wrap gap-2">
-              <Button disabled={isBusy} onClick={queryProfile}>
-                {isQuerying ? "查询中..." : "查询"}
-              </Button>
-              <Button disabled={isBusy} variant="destructive" onClick={deleteProfile}>
-                <Trash2 aria-hidden="true" />
-                {isDeleting ? "删除中..." : "删除"}
-              </Button>
-            </div>
-            {error && <p className="text-sm text-destructive">{error}</p>}
-            {message && <p className="text-sm text-muted-foreground">{message}</p>}
-          </div>
-        </CardContent>
-      </Card>
-
-      <Card>
-        <CardHeader>
-          <CardTitle>查询结果</CardTitle>
-          <CardDescription>查询成功后展示 GitHub 当前账户信息。</CardDescription>
-        </CardHeader>
-        <CardContent>
-          {profile ? (
-            <div className="grid gap-4 md:grid-cols-[120px_1fr]">
-              <div className="size-28 overflow-hidden border bg-muted">
-                {profile.avatarUrl ? (
-                  <img
-                    className="size-full object-cover"
-                    src={profile.avatarUrl}
-                    alt={`${profile.login} avatar`}
-                  />
-                ) : (
-                  <div className="flex size-full items-center justify-center text-xs text-muted-foreground">
-                    头像
-                  </div>
-                )}
+    <main className="min-h-full bg-[#f9f9ff] text-[#181c23]">
+      <div className="mx-auto grid w-full max-w-[1200px] gap-6 px-5 py-6 sm:px-8 lg:grid-cols-[minmax(0,1fr)_320px] lg:py-8">
+        <section className="min-w-0 space-y-6">
+          <div className="rounded-2xl border border-[#c1c6d7] bg-white p-5 sm:p-6">
+            <div className="flex flex-col gap-5">
+              <div className="flex items-start gap-4">
+                <div className="flex size-11 shrink-0 items-center justify-center rounded-2xl bg-[#d8e2ff] text-[#0058bc]">
+                  <GitBranch className="size-5" />
+                </div>
+                <div className="min-w-0">
+                  <h1 className="text-[20px] font-semibold leading-[26px] text-[#181c23]">
+                    连接 GitHub 账户
+                  </h1>
+                  <p className="mt-1 text-[15px] leading-[22px] text-[#5d5e63]">
+                    输入 GitHub Token，查询当前账户资料并保存到数据库。
+                  </p>
+                </div>
               </div>
-              <dl className="grid gap-3 text-sm sm:grid-cols-2">
-                <ProfileField label="GitHub ID" value={String(profile.githubId)} />
-                <ProfileField label="用户名 login" value={profile.login} />
-                <ProfileField label="昵称 name" value={profile.name || "-"} />
-                <ProfileField
-                  label="个人主页 htmlUrl"
-                  value={
-                    profile.htmlUrl ? (
-                      <a
-                        className="text-primary underline-offset-4 hover:underline"
-                        href={profile.htmlUrl}
-                        target="_blank"
-                        rel="noreferrer"
-                      >
-                        {profile.htmlUrl}
-                      </a>
-                    ) : (
-                      "-"
-                    )
-                  }
-                />
-                <ProfileField label="简介 bio" value={profile.bio || "-"} />
-                <ProfileField label="公开仓库数 publicRepos" value={String(profile.publicRepos)} />
-                <ProfileField label="粉丝数 followers" value={String(profile.followers)} />
-                <ProfileField label="关注数 following" value={String(profile.following)} />
-              </dl>
+
+              <div className="grid gap-3 sm:grid-cols-[minmax(0,1fr)_auto_auto]">
+                <div className="relative min-w-0">
+                  <KeyRound className="pointer-events-none absolute left-4 top-1/2 size-4 -translate-y-1/2 text-[#717786]" />
+                  <Input
+                    id="github-token"
+                    type="password"
+                    value={token}
+                    placeholder="Enter your GitHub Token..."
+                    autoComplete="off"
+                    disabled={isBusy}
+                    className="h-12 rounded-xl border-0 bg-[#f1f3fe] pl-11 pr-4 text-[15px] leading-[22px] text-[#181c23] placeholder:text-[#717786] focus-visible:border-[#0058bc] focus-visible:ring-2 focus-visible:ring-[#0058bc]/20"
+                    onChange={(event) => setToken(event.target.value)}
+                  />
+                </div>
+
+                <Button
+                  disabled={isBusy || !token.trim()}
+                  className="h-12 rounded-xl bg-[#0058bc] px-5 text-[13px] font-medium leading-[18px] text-white transition-all hover:bg-[#0070eb] active:scale-[0.98]"
+                  onClick={queryProfile}
+                >
+                  {isQuerying ? (
+                    <>
+                      <LoaderCircle className="size-4 animate-spin" />
+                      查询中...
+                    </>
+                  ) : (
+                    "查询"
+                  )}
+                </Button>
+
+                <Button
+                  disabled={isBusy || profile === null}
+                  variant="destructive"
+                  className="h-12 rounded-xl bg-[#ffdad6] px-5 text-[13px] font-medium leading-[18px] text-[#93000a] transition-all hover:bg-[#ffcbc5] active:scale-[0.98]"
+                  onClick={deleteProfile}
+                >
+                  {isDeleting ? (
+                    <>
+                      <LoaderCircle className="size-4 animate-spin" />
+                      删除中...
+                    </>
+                  ) : (
+                    <>
+                      <Trash2 className="size-4" aria-hidden="true" />
+                      删除
+                    </>
+                  )}
+                </Button>
+              </div>
+
+              {error && (
+                <div className="rounded-xl border border-[#ffdad6] bg-[#fff3f1] px-4 py-3 text-[13px] font-medium leading-[18px] text-[#93000a]">
+                  {error}
+                </div>
+              )}
+              {message && (
+                <div className="rounded-xl border border-[#c1c6d7]/70 bg-[#f1f3fe] px-4 py-3 text-[13px] font-medium leading-[18px] text-[#0058bc]">
+                  {message}
+                </div>
+              )}
             </div>
+          </div>
+
+          {profile ? (
+            <ProfileCard profile={profile} />
           ) : (
-            <div className="flex min-h-40 items-center justify-center border border-dashed text-sm text-muted-foreground">
-              暂无查询结果
-            </div>
+            <StatePanel
+              icon={<UserRound className="size-5" />}
+              title="尚未查询个人信息"
+              description="输入 GitHub Token 并点击查询后，这里会展示账户资料。"
+            />
           )}
-        </CardContent>
-      </Card>
+        </section>
+
+        <aside className="space-y-4">
+          <div className="rounded-2xl border border-[#c1c6d7] bg-white p-5">
+            <div className="flex items-center gap-3">
+              <div className="flex size-10 shrink-0 items-center justify-center rounded-xl bg-[#ecedf9] text-[#0058bc]">
+                <ShieldCheck className="size-5" />
+              </div>
+              <div>
+                <h2 className="text-[15px] font-semibold leading-[22px] text-[#181c23]">
+                  Token 仅用于查询
+                </h2>
+                <p className="mt-1 text-[13px] leading-[18px] text-[#5d5e63]">
+                  Token 不会写入数据库，接口只保存 GitHub 返回的公开账户字段。
+                </p>
+              </div>
+            </div>
+          </div>
+
+          <div className="rounded-2xl border border-[#c1c6d7] bg-white p-5">
+            <p className="text-[11px] font-semibold uppercase leading-[14px] text-[#717786]">
+              Current result
+            </p>
+            <p className="mt-3 text-[28px] font-semibold leading-[34px] text-[#181c23]">
+              {profile === null ? "Waiting" : "Ready"}
+            </p>
+            <p className="mt-1 text-[13px] leading-[18px] text-[#5d5e63]">
+              {profile === null ? "当前页面还没有查询结果。" : `@${profile.login} 已查询完成。`}
+            </p>
+          </div>
+        </aside>
+      </div>
     </main>
   );
 }
 
-function ProfileField({ label, value }: { label: string; value: ReactNode }) {
+function ProfileCard({ profile }: { profile: GithubProfile }) {
+  const displayName = profile.name || profile.login;
+
   return (
-    <div className="grid gap-1">
-      <dt className="text-xs text-muted-foreground">{label}</dt>
-      <dd className="break-words">{value}</dd>
+    <div className="overflow-hidden rounded-2xl border border-[#c1c6d7] bg-white">
+      <div className="border-b border-[#c1c6d7]/60 bg-[#f1f3fe] p-5 sm:p-6">
+        <div className="flex flex-col gap-5 sm:flex-row sm:items-center sm:justify-between">
+          <div className="flex min-w-0 items-center gap-4">
+            {profile.avatarUrl ? (
+              <img
+                src={profile.avatarUrl}
+                alt={`${profile.login} avatar`}
+                className="size-20 rounded-full border border-white object-cover ring-1 ring-[#c1c6d7]"
+              />
+            ) : (
+              <div className="flex size-20 items-center justify-center rounded-full bg-white text-[#0058bc] ring-1 ring-[#c1c6d7]">
+                <UserRound className="size-8" />
+              </div>
+            )}
+
+            <div className="min-w-0">
+              <h2 className="truncate text-[24px] font-semibold leading-[30px] text-[#181c23]">
+                {displayName}
+              </h2>
+              <p className="mt-1 flex items-center gap-2 text-[15px] leading-[22px] text-[#5d5e63]">
+                <AtSign className="size-4" />
+                {profile.login}
+              </p>
+            </div>
+          </div>
+
+          {profile.htmlUrl && (
+            <a
+              href={profile.htmlUrl}
+              target="_blank"
+              rel="noopener noreferrer"
+              className="inline-flex h-10 shrink-0 items-center justify-center gap-2 rounded-xl bg-white px-3 text-[13px] font-medium leading-[18px] text-[#0058bc] ring-1 ring-[#c1c6d7] transition-all hover:bg-[#f9f9ff] active:scale-[0.98]"
+            >
+              Open GitHub
+              <ExternalLink className="size-4" />
+            </a>
+          )}
+        </div>
+      </div>
+
+      <div className="grid gap-4 p-5 sm:grid-cols-3 sm:p-6">
+        <MetricCard
+          icon={<BookOpen className="size-4" />}
+          label="Public Repos"
+          value={profile.publicRepos}
+        />
+        <MetricCard
+          icon={<Users className="size-4" />}
+          label="Followers"
+          value={profile.followers}
+        />
+        <MetricCard
+          icon={<UserRound className="size-4" />}
+          label="Following"
+          value={profile.following}
+        />
+      </div>
+
+      <dl className="grid grid-cols-1 gap-4 border-t border-[#c1c6d7]/60 p-5 sm:grid-cols-2 sm:p-6">
+        <FieldItem
+          icon={<IdCard className="size-4" />}
+          label="GitHub ID"
+          value={profile.githubId}
+        />
+        <FieldItem icon={<AtSign className="size-4" />} label="Login" value={profile.login} />
+        <FieldItem
+          className="sm:col-span-2"
+          icon={<ExternalLink className="size-4" />}
+          label="Profile URL"
+          value={profile.htmlUrl}
+          href={profile.htmlUrl}
+        />
+        <FieldItem
+          className="sm:col-span-2"
+          icon={<UserRound className="size-4" />}
+          label="Bio"
+          value={profile.bio && profile.bio.length > 0 ? profile.bio : null}
+        />
+      </dl>
+    </div>
+  );
+}
+
+function StatePanel({
+  icon,
+  title,
+  description,
+}: {
+  icon: ReactNode;
+  title: string;
+  description: string;
+}) {
+  return (
+    <div className="flex min-h-72 items-center justify-center rounded-2xl border border-[#c1c6d7] bg-white p-8 text-center">
+      <div className="max-w-sm">
+        <div className="mx-auto flex size-12 items-center justify-center rounded-2xl bg-[#d8e2ff] text-[#0058bc]">
+          {icon}
+        </div>
+        <h2 className="mt-4 text-[20px] font-semibold leading-[26px] text-[#181c23]">{title}</h2>
+        <p className="mt-2 text-[15px] leading-[22px] text-[#5d5e63]">{description}</p>
+      </div>
+    </div>
+  );
+}
+
+function MetricCard({ icon, label, value }: { icon: ReactNode; label: string; value: number }) {
+  return (
+    <div className="rounded-2xl border border-[#c1c6d7]/70 bg-[#f9f9ff] p-4">
+      <div className="flex items-center gap-2 text-[#5d5e63]">
+        {icon}
+        <span className="text-[13px] font-medium leading-[18px]">{label}</span>
+      </div>
+      <p className="mt-3 text-[28px] font-semibold leading-[34px] text-[#181c23]">{value}</p>
+    </div>
+  );
+}
+
+function FieldItem({
+  icon,
+  label,
+  value,
+  href,
+  className = "",
+}: {
+  icon: ReactNode;
+  label: string;
+  value: number | string | null;
+  href?: string | null;
+  className?: string;
+}) {
+  const empty = value === null || value === "";
+
+  return (
+    <div className={`rounded-2xl border border-[#c1c6d7]/70 bg-white p-4 ${className}`}>
+      <dt className="flex items-center gap-2 text-[13px] font-medium leading-[18px] text-[#5d5e63]">
+        <span className="text-[#717786]">{icon}</span>
+        {label}
+      </dt>
+      <dd className="mt-2 break-words text-[15px] font-medium leading-[22px] text-[#181c23]">
+        {empty ? (
+          <span className="text-[#717786]">Not provided</span>
+        ) : href ? (
+          <a
+            href={href}
+            target="_blank"
+            rel="noopener noreferrer"
+            className="text-[#0058bc] transition-colors hover:text-[#0070eb]"
+          >
+            {value}
+          </a>
+        ) : (
+          value
+        )}
+      </dd>
     </div>
   );
 }
