@@ -77,14 +77,13 @@ NODE_ENV=production
 
 Local development reads the same variable names from `apps/server/.env`. In AWS, do not upload `.env`; configure the values in Lambda environment variables or through your deployment tool. If the database is in a private VPC, attach the Lambda function to the same VPC/subnets/security groups, or use an RDS Proxy endpoint in `DATABASE_URL`.
 
-## Cloudflare Pages Deployment
+## Cloudflare Worker Static Assets Deployment
 
-The frontend is deployed by GitHub Actions with Wrangler direct upload. No `wrangler.jsonc` is required for the static Pages deployment.
+The frontend is deployed by GitHub Actions to the existing `token-query` Worker with Workers Static Assets. No `wrangler.jsonc` is required for the static assets deployment.
 
 Configure these GitHub repository variables:
 
 ```text
-CLOUDFLARE_PAGES_PROJECT=token-query
 VITE_SERVER_URL=https://your-api-domain.example.com
 ```
 
@@ -95,7 +94,11 @@ CLOUDFLARE_ACCOUNT_ID=your-cloudflare-account-id
 CLOUDFLARE_API_TOKEN=your-cloudflare-api-token
 ```
 
-Bind custom frontend domains in the Cloudflare Pages project settings. Do not hardcode Pages custom domains or Worker routes in the repository unless the project is deployed as a Worker instead of Pages.
+Bind custom frontend domains to the `token-query` Worker in Cloudflare. The workflow uploads `apps/web/build/client` with:
+
+```bash
+wrangler deploy --name=token-query --assets=apps/web/build/client
+```
 
 ## UI Customization
 
