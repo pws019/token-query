@@ -95,6 +95,16 @@ CLOUDFLARE_ACCOUNT_ID=your-cloudflare-account-id
 CLOUDFLARE_API_TOKEN=your-cloudflare-api-token
 ```
 
+The Cloudflare API token needs these permissions:
+
+```text
+Account / Workers Scripts / Edit
+Account / Account Settings / Read
+Zone / Workers Routes / Edit
+Zone / Zone / Read
+User / User Details / Read
+```
+
 Bind the same custom frontend domain to the `token-query` Worker in Cloudflare Dashboard. `CLOUDFLARE_WORKER_DOMAIN` should be the Custom Domain host name only, without `https://` and without `/*`.
 
 ```bash
