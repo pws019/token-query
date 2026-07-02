@@ -36,11 +36,9 @@ jobs:
         env:
           CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
           CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
-          CLOUDFLARE_WORKER_ROUTE: ${{ vars.CLOUDFLARE_WORKER_ROUTE }}
         run: |
           test -n "$CLOUDFLARE_API_TOKEN"
           test -n "$CLOUDFLARE_ACCOUNT_ID"
-          test -n "$CLOUDFLARE_WORKER_ROUTE"
 
       - name: Deploy to Cloudflare Worker
         env:
@@ -51,5 +49,4 @@ jobs:
           --name=token-query
           --compatibility-date=2026-07-01
           --assets=apps/web/build/client
-          --route="${{ vars.CLOUDFLARE_WORKER_ROUTE }}"
           --keep-vars
