@@ -84,6 +84,7 @@ The frontend is deployed by GitHub Actions to the existing `token-query` Worker 
 Configure these GitHub repository variables:
 
 ```text
+CLOUDFLARE_WORKER_DOMAIN=your-frontend-domain.example.com
 VITE_SERVER_URL=https://your-api-domain.example.com
 ```
 
@@ -94,10 +95,10 @@ CLOUDFLARE_ACCOUNT_ID=your-cloudflare-account-id
 CLOUDFLARE_API_TOKEN=your-cloudflare-api-token
 ```
 
-Bind custom frontend domains to the `token-query` Worker in Cloudflare Dashboard. Keep that binding there; the GitHub workflow only uploads `apps/web/build/client` and does not create or update Worker routes or a `workers.dev` subdomain.
+Bind the same custom frontend domain to the `token-query` Worker in Cloudflare Dashboard. `CLOUDFLARE_WORKER_DOMAIN` should be the Custom Domain host name only, without `https://` and without `/*`.
 
 ```bash
-wrangler deploy --name=token-query --assets=apps/web/build/client --workers-dev=false
+wrangler deploy --name=token-query --assets=apps/web/build/client --domain="$CLOUDFLARE_WORKER_DOMAIN"
 ```
 
 ## UI Customization
