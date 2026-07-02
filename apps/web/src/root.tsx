@@ -49,9 +49,9 @@ export default function App() {
     <QueryClientProvider client={queryClient}>
       <ThemeProvider
         attribute="class"
-        defaultTheme="dark"
+        defaultTheme="light"
         disableTransitionOnChange
-        storageKey="vite-ui-theme"
+        storageKey="token-query-theme"
       >
         <div className="grid grid-rows-[auto_1fr] h-svh">
           <Header />
