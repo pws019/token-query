@@ -6,6 +6,7 @@ import { Hono } from "hono";
 import { cors } from "hono/cors";
 import { logger } from "hono/logger";
 
+import { adminRoutes } from "./routes/admin";
 import { githubRoutes } from "./routes/github";
 
 const app = new Hono();
@@ -20,6 +21,7 @@ app.use(
   }),
 );
 
+app.route("/api/admin", adminRoutes);
 app.route("/api/github", githubRoutes);
 
 app.use(
