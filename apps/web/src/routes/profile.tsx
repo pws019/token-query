@@ -1,6 +1,5 @@
 import { Button } from "@token-query/ui/components/button";
 import { Input } from "@token-query/ui/components/input";
-import { env } from "@token-query/env/web";
 import {
   AtSign,
   BookOpen,
@@ -54,7 +53,7 @@ export default function Profile() {
     setIsQuerying(true);
 
     try {
-      const response = await fetch(`${env.VITE_SERVER_URL}/api/github/profile`, {
+      const response = await fetch("/api/github/profile", {
         method: "POST",
         headers: {
           "Content-Type": "application/json",
@@ -82,7 +81,7 @@ export default function Profile() {
     setIsDeleting(true);
 
     try {
-      const response = await fetch(`${env.VITE_SERVER_URL}/api/github/profile`, {
+      const response = await fetch("/api/github/profile", {
         method: "DELETE",
       });
       const result = await response.json();

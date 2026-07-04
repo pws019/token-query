@@ -8,6 +8,10 @@ export default defineConfig({
   resolve: {
     tsconfigPaths: true,
   },
+  ssr: {
+    noExternal: true,
+    target: "webworker",
+  },
   server: {
     watch: {
       usePolling: true,

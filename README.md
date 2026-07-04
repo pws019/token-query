@@ -72,20 +72,20 @@ Configure these Lambda environment variables:
 ```text
 DATABASE_URL=postgresql://USER:PASSWORD@HOST:5432/DATABASE
 CORS_ORIGIN=https://your-frontend-domain.example.com
+INTERNAL_PROXY_TOKEN=shared-secret-with-cloudflare-worker
 NODE_ENV=production
 ```
 
 Local development reads the same variable names from `apps/server/.env`. In AWS, do not upload `.env`; configure the values in Lambda environment variables or through your deployment tool. If the database is in a private VPC, attach the Lambda function to the same VPC/subnets/security groups, or use an RDS Proxy endpoint in `DATABASE_URL`.
 
-## Cloudflare Worker Static Assets Deployment
+## Cloudflare Worker SSR Deployment
 
-The frontend is deployed by GitHub Actions to the existing `token-query` Worker with Workers Static Assets. No `wrangler.jsonc` is required for the static assets deployment.
+The frontend is deployed by GitHub Actions to the `token-query` Worker. The Worker serves React Router SSR and proxies `/api/*` requests to the AWS Lambda API. The workflow generates the Wrangler config at deploy time, so no checked-in `wrangler.jsonc` is required.
 
 Configure these GitHub repository variables:
 
 ```text
 CLOUDFLARE_WORKER_DOMAIN=your-frontend-domain.example.com
-VITE_SERVER_URL=https://your-api-domain.example.com
 ```
 
 Configure these GitHub repository secrets:
@@ -105,10 +105,17 @@ Zone / Zone / Read
 User / User Details / Read
 ```
 
+Configure these Cloudflare Worker runtime variables or secrets for the deployed `token-query` Worker:
+
+```text
+LAMBDA_API_ORIGIN=https://your-api-gateway-domain.example.com
+INTERNAL_PROXY_TOKEN=shared-secret-with-lambda
+```
+
 Bind the same custom frontend domain to the `token-query` Worker in Cloudflare Dashboard. `CLOUDFLARE_WORKER_DOMAIN` should be the Custom Domain host name only, without `https://` and without `/*`.
 
 ```bash
-wrangler deploy --name=token-query --assets=apps/web/build/client --domain="$CLOUDFLARE_WORKER_DOMAIN"
+wrangler deploy --config=apps/web/wrangler.generated.jsonc --domain="$CLOUDFLARE_WORKER_DOMAIN" --keep-vars
 ```
 
 ## UI Customization

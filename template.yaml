@@ -12,6 +12,11 @@ Parameters:
     Type: String
     Default: http://localhost:5173
     Description: Allowed frontend origin, for example https://your-frontend-domain.example.com.
+  InternalProxyToken:
+    Type: String
+    NoEcho: true
+    MinLength: 16
+    Description: Shared secret required on requests proxied from Cloudflare Worker to Lambda.
   NodeEnv:
     Type: String
     Default: production
@@ -40,7 +45,7 @@ Resources:
     Properties:
       CodeUri: .
       Handler: lambda.handler
-      Runtime: nodejs20.x
+      Runtime: nodejs22.x
       Timeout: 20
       MemorySize: 512
       Architectures:
@@ -67,6 +72,7 @@ Resources:
               Port: !GetAtt AuroraCluster.Endpoint.Port
               Database: !Ref DBName
           CORS_ORIGIN: !Ref CorsOrigin
+          INTERNAL_PROXY_TOKEN: !Ref InternalProxyToken
           NODE_ENV: production
       Events:
         Root:

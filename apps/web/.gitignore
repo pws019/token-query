@@ -27,6 +27,7 @@
 .netlify
 .wrangler
 .alchemy
+wrangler.generated.jsonc
 
 # Environment & local files
 .env*
