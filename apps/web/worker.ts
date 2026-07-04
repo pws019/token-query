@@ -59,12 +59,34 @@ async function proxyToLambda(request: Request, env: Env) {
     headers.set("X-Internal-Proxy-Token", env.INTERNAL_PROXY_TOKEN);
   }
 
-  const response = await fetch(upstreamUrl, {
-    method: request.method,
-    headers,
-    body: request.method === "GET" || request.method === "HEAD" ? undefined : request.body,
-    redirect: "manual",
-  });
+  let response: Response;
+  try {
+    response = await fetch(upstreamUrl, {
+      method: request.method,
+      headers,
+      body: request.method === "GET" || request.method === "HEAD" ? undefined : request.body,
+      redirect: "manual",
+    });
+  } catch (error) {
+    console.error("lambda proxy fetch failed", {
+      method: request.method,
+      path: incomingUrl.pathname,
+      upstreamOrigin: upstreamUrl.origin,
+      cause: error instanceof Error ? error.name : "UnknownError",
+      message: error instanceof Error ? error.message : undefined,
+      durationMs: Date.now() - startedAt,
+    });
+
+    return Response.json(
+      { code: "lambda_proxy_fetch_failed", error: "Lambda proxy request failed." },
+      {
+        status: 502,
+        headers: {
+          "X-Token-Query-Proxy": "cloudflare-worker",
+        },
+      },
+    );
+  }
 
   console.log("lambda proxy response", {
     method: request.method,
@@ -73,7 +95,28 @@ async function proxyToLambda(request: Request, env: Env) {
     durationMs: Date.now() - startedAt,
   });
 
-  const proxiedResponse = new Response(response.body, response);
+  if (response.status >= 500) {
+    const bodySnippet = await response
+      .clone()
+      .text()
+      .then((body) => body.slice(0, 500))
+      .catch(() => "<unavailable>");
+
+    console.error("lambda proxy upstream error", {
+      method: request.method,
+      path: incomingUrl.pathname,
+      status: response.status,
+      contentType: response.headers.get("content-type"),
+      bodySnippet,
+    });
+  }
+
+  const proxiedHeaders = new Headers(response.headers);
+  const proxiedResponse = new Response(response.body, {
+    status: response.status,
+    statusText: response.statusText,
+    headers: proxiedHeaders,
+  });
   proxiedResponse.headers.set("X-Token-Query-Proxy", "cloudflare-worker");
   proxiedResponse.headers.set("X-Token-Query-Upstream-Status", String(response.status));
   return proxiedResponse;
