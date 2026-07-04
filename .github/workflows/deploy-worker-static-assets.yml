@@ -31,13 +31,18 @@ jobs:
         run: pnpm --filter web build
 
       - name: Generate Wrangler config
+        env:
+          LAMBDA_API_ORIGIN: ${{ vars.LAMBDA_API_ORIGIN }}
         run: |
-          cat > apps/web/wrangler.generated.jsonc <<'EOF'
+          cat > apps/web/wrangler.generated.jsonc <<EOF
           {
             "$schema": "../../node_modules/wrangler/config-schema.json",
             "name": "token-query",
             "main": "./worker.ts",
             "compatibility_date": "2026-07-01",
+            "vars": {
+              "LAMBDA_API_ORIGIN": "$LAMBDA_API_ORIGIN"
+            },
             "assets": {
               "directory": "./build/client",
               "binding": "ASSETS"
@@ -50,10 +55,14 @@ jobs:
           CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
           CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
           CLOUDFLARE_WORKER_DOMAIN: ${{ vars.CLOUDFLARE_WORKER_DOMAIN }}
+          LAMBDA_API_ORIGIN: ${{ vars.LAMBDA_API_ORIGIN }}
+          INTERNAL_PROXY_TOKEN: ${{ secrets.INTERNAL_PROXY_TOKEN }}
         run: |
           test -n "$CLOUDFLARE_API_TOKEN"
           test -n "$CLOUDFLARE_ACCOUNT_ID"
           test -n "$CLOUDFLARE_WORKER_DOMAIN"
+          test -n "$LAMBDA_API_ORIGIN"
+          test -n "$INTERNAL_PROXY_TOKEN"
 
       - name: Deploy to Cloudflare Worker
         env:
@@ -64,3 +73,11 @@ jobs:
           --config=apps/web/wrangler.generated.jsonc
           --domain="${{ vars.CLOUDFLARE_WORKER_DOMAIN }}"
           --keep-vars
+
+      - name: Set Cloudflare Worker secrets
+        env:
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+          INTERNAL_PROXY_TOKEN: ${{ secrets.INTERNAL_PROXY_TOKEN }}
+        run: |
+          printf "%s" "$INTERNAL_PROXY_TOKEN" | pnpm dlx wrangler@4 secret put INTERNAL_PROXY_TOKEN --config=apps/web/wrangler.generated.jsonc

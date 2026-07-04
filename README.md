@@ -86,6 +86,7 @@ Configure these GitHub repository variables:
 
 ```text
 CLOUDFLARE_WORKER_DOMAIN=your-frontend-domain.example.com
+LAMBDA_API_ORIGIN=https://your-api-gateway-domain.example.com
 ```
 
 Configure these GitHub repository secrets:
@@ -93,6 +94,7 @@ Configure these GitHub repository secrets:
 ```text
 CLOUDFLARE_ACCOUNT_ID=your-cloudflare-account-id
 CLOUDFLARE_API_TOKEN=your-cloudflare-api-token
+INTERNAL_PROXY_TOKEN=shared-secret-with-lambda
 ```
 
 The Cloudflare API token needs these permissions:
@@ -105,11 +107,11 @@ Zone / Zone / Read
 User / User Details / Read
 ```
 
-Configure these Cloudflare Worker runtime variables or secrets for the deployed `token-query` Worker:
+The workflow writes these values into the Cloudflare Worker runtime:
 
 ```text
-LAMBDA_API_ORIGIN=https://your-api-gateway-domain.example.com
-INTERNAL_PROXY_TOKEN=shared-secret-with-lambda
+LAMBDA_API_ORIGIN from GitHub repository variables
+INTERNAL_PROXY_TOKEN from GitHub repository secrets
 ```
 
 Bind the same custom frontend domain to the `token-query` Worker in Cloudflare Dashboard. `CLOUDFLARE_WORKER_DOMAIN` should be the Custom Domain host name only, without `https://` and without `/*`.
