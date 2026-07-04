@@ -24,6 +24,11 @@ export default {
     const url = new URL(request.url);
 
     if (url.pathname.startsWith("/api/")) {
+      console.log("api proxy request", {
+        method: request.method,
+        path: url.pathname,
+      });
+
       return proxyToLambda(request, env);
     }
 
@@ -37,20 +42,39 @@ export default {
   },
 };
 
-function proxyToLambda(request: Request, env: Env) {
+async function proxyToLambda(request: Request, env: Env) {
   const incomingUrl = new URL(request.url);
   const upstreamUrl = new URL(incomingUrl.pathname + incomingUrl.search, env.LAMBDA_API_ORIGIN);
   const headers = new Headers(request.headers);
+  const startedAt = Date.now();
+
+  console.log("proxy to lambda", {
+    method: request.method,
+    path: incomingUrl.pathname,
+    upstreamOrigin: upstreamUrl.origin,
+  });
 
   headers.delete("host");
   if (env.INTERNAL_PROXY_TOKEN) {
     headers.set("X-Internal-Proxy-Token", env.INTERNAL_PROXY_TOKEN);
   }
 
-  return fetch(upstreamUrl, {
+  const response = await fetch(upstreamUrl, {
     method: request.method,
     headers,
     body: request.method === "GET" || request.method === "HEAD" ? undefined : request.body,
     redirect: "manual",
   });
+
+  console.log("lambda proxy response", {
+    method: request.method,
+    path: incomingUrl.pathname,
+    status: response.status,
+    durationMs: Date.now() - startedAt,
+  });
+
+  const proxiedResponse = new Response(response.body, response);
+  proxiedResponse.headers.set("X-Token-Query-Proxy", "cloudflare-worker");
+  proxiedResponse.headers.set("X-Token-Query-Upstream-Status", String(response.status));
+  return proxiedResponse;
 }
