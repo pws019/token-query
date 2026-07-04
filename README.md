@@ -114,6 +114,8 @@ LAMBDA_API_ORIGIN from GitHub repository variables
 INTERNAL_PROXY_TOKEN from GitHub repository secrets
 ```
 
+The workflow also enables Cloudflare Worker observability logs through the generated Wrangler config.
+
 Bind the same custom frontend domain to the `token-query` Worker in Cloudflare Dashboard. `CLOUDFLARE_WORKER_DOMAIN` should be the Custom Domain host name only, without `https://` and without `/*`.
 
 ```bash
