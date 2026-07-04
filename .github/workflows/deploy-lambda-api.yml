@@ -1,0 +1,87 @@
+name: Deploy AWS Lambda API
+
+on:
+  push:
+    branches:
+      - main
+    paths:
+      - "apps/server/**"
+      - "packages/**"
+      - "package.json"
+      - "pnpm-lock.yaml"
+      - "pnpm-workspace.yaml"
+      - "turbo.json"
+      - ".github/workflows/deploy-lambda-api.yml"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  id-token: write
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    env:
+      AWS_REGION: ${{ vars.AWS_REGION || 'us-west-2' }}
+      LAMBDA_FUNCTION_NAME: ${{ vars.LAMBDA_FUNCTION_NAME || 'token-query-function' }}
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup pnpm
+        uses: pnpm/action-setup@v4
+        with:
+          version: 11.8.0
+
+      - name: Setup Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: pnpm
+
+      - name: Install dependencies
+        run: pnpm install --frozen-lockfile
+
+      - name: Check Lambda deployment settings
+        env:
+          AWS_ROLE_TO_ASSUME: ${{ secrets.AWS_ROLE_TO_ASSUME }}
+        run: |
+          test -n "$AWS_REGION"
+          test -n "$LAMBDA_FUNCTION_NAME"
+          test -n "$AWS_ROLE_TO_ASSUME"
+
+      - name: Check server types
+        run: pnpm --filter server check-types
+
+      - name: Build server
+        run: pnpm --filter server build
+
+      - name: Package Lambda artifact
+        working-directory: apps/server/dist
+        run: zip -r ../../../lambda-api.zip . -i "*.mjs"
+
+      - name: Configure AWS credentials
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          role-to-assume: ${{ secrets.AWS_ROLE_TO_ASSUME }}
+          aws-region: ${{ env.AWS_REGION }}
+
+      - name: Deploy Lambda code
+        run: |
+          aws lambda update-function-code \
+            --function-name "$LAMBDA_FUNCTION_NAME" \
+            --zip-file fileb://lambda-api.zip \
+            --region "$AWS_REGION"
+
+          aws lambda wait function-updated \
+            --function-name "$LAMBDA_FUNCTION_NAME" \
+            --region "$AWS_REGION"
+
+      - name: Verify Lambda configuration
+        run: |
+          aws lambda get-function-configuration \
+            --function-name "$LAMBDA_FUNCTION_NAME" \
+            --region "$AWS_REGION" \
+            --query '{FunctionName:FunctionName,Runtime:Runtime,Handler:Handler,LastModified:LastModified,LastUpdateStatus:LastUpdateStatus,Architectures:Architectures}' \
+            --output table

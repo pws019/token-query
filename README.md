@@ -78,6 +78,62 @@ NODE_ENV=production
 
 Local development reads the same variable names from `apps/server/.env`. In AWS, do not upload `.env`; configure the values in Lambda environment variables or through your deployment tool. If the database is in a private VPC, attach the Lambda function to the same VPC/subnets/security groups, or use an RDS Proxy endpoint in `DATABASE_URL`.
 
+### GitHub Actions Lambda Deployment
+
+The Lambda API is deployed by `.github/workflows/deploy-lambda-api.yml`. The workflow builds `apps/server`, zips `apps/server/dist/*`, and updates the existing Lambda function code. It does not update Lambda environment variables, VPC settings, handler, runtime, or API Gateway routes.
+
+Current deployed Lambda shape:
+
+```text
+AWS_REGION=us-west-2
+LAMBDA_FUNCTION_NAME=token-query-function
+Runtime=nodejs22.x
+Handler=lambda.handler
+Architecture=arm64
+```
+
+Configure these GitHub repository variables:
+
+```text
+AWS_REGION=us-west-2
+LAMBDA_FUNCTION_NAME=token-query-function
+```
+
+Configure this GitHub repository secret:
+
+```text
+AWS_ROLE_TO_ASSUME=arn:aws:iam::<account-id>:role/<github-actions-lambda-deploy-role>
+```
+
+The recommended AWS credential flow is GitHub OIDC. The IAM role used by `AWS_ROLE_TO_ASSUME` needs permission to update and read the existing Lambda function:
+
+```json
+{
+  "Version": "2012-10-17",
+  "Statement": [
+    {
+      "Effect": "Allow",
+      "Action": [
+        "lambda:UpdateFunctionCode",
+        "lambda:GetFunction",
+        "lambda:GetFunctionConfiguration"
+      ],
+      "Resource": "arn:aws:lambda:us-west-2:<account-id>:function:token-query-function"
+    }
+  ]
+}
+```
+
+Keep production runtime settings in Lambda itself:
+
+```text
+DATABASE_URL
+CORS_ORIGIN
+INTERNAL_PROXY_TOKEN
+ADMIN_MIGRATION_TOKEN   # temporary; remove or clear after database initialization
+NODE_ENV
+```
+
 ## Cloudflare Worker SSR Deployment
 
 The frontend is deployed by GitHub Actions to the `token-query` Worker. The Worker serves React Router SSR and proxies `/api/*` requests to the AWS Lambda API. The workflow generates the Wrangler config at deploy time, so no checked-in `wrangler.jsonc` is required.
