@@ -6,6 +6,7 @@ import {
   githubProfileRequestSchema,
   queryAndSaveGithubProfile,
 } from "../services/github-profile";
+import { serializeError } from "../utils/error-log";
 
 const queryFailedError = "GitHub information query failed. Please check your token.";
 const invalidRequestError = "Invalid request payload.";
@@ -41,7 +42,7 @@ githubRoutes.post("/profile", async (c) => {
     }
 
     console.error("github_profile_unexpected_error", {
-      cause: error instanceof Error ? error.name : "UnknownError",
+      cause: serializeError(error),
     });
     return c.json({ code: "unexpected_error", error: queryFailedError }, 500);
   }
@@ -55,6 +56,7 @@ githubRoutes.delete("/profile", async (c) => {
     console.error("github_profile_delete_failed", {
       code: error instanceof GithubProfileError ? error.code : "unexpected_error",
       meta: error instanceof GithubProfileError ? error.meta : undefined,
+      cause: error instanceof GithubProfileError ? undefined : serializeError(error),
     });
     return c.json({ code: "database_delete_failed", error: deleteFailedError }, 500);
   }
