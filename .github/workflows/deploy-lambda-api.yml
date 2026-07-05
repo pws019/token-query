@@ -29,6 +29,7 @@ jobs:
       CORS_ORIGIN: ${{ vars.CORS_ORIGIN || 'https://app.doyouadoreme.online' }}
       PRIVATE_SUBNET_IDS: ${{ vars.PRIVATE_SUBNET_IDS || 'subnet-0733f030693829d94,subnet-0a5b4b26959047941' }}
       LAMBDA_SECURITY_GROUP_ID: ${{ vars.LAMBDA_SECURITY_GROUP_ID || 'sg-09a462643a2e9b6c0' }}
+      LAMBDA_EXECUTION_ROLE_ARN: ${{ vars.LAMBDA_EXECUTION_ROLE_ARN || 'arn:aws:iam::707605822527:role/service-role/token-query-function-role-qsx6aji9' }}
 
     steps:
       - name: Checkout
@@ -65,6 +66,7 @@ jobs:
           test -n "$CORS_ORIGIN"
           test -n "$PRIVATE_SUBNET_IDS"
           test -n "$LAMBDA_SECURITY_GROUP_ID"
+          test -n "$LAMBDA_EXECUTION_ROLE_ARN"
 
       - name: Check server types
         run: pnpm --filter server check-types
@@ -96,6 +98,7 @@ jobs:
             "InternalProxyToken=$INTERNAL_PROXY_TOKEN"
             "PrivateSubnetIds=$PRIVATE_SUBNET_IDS"
             "LambdaSecurityGroupId=$LAMBDA_SECURITY_GROUP_ID"
+            "LambdaExecutionRoleArn=$LAMBDA_EXECUTION_ROLE_ARN"
           )
 
           if [ -n "$ADMIN_MIGRATION_TOKEN" ]; then

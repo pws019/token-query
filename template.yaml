@@ -40,20 +40,28 @@ Parameters:
     Type: AWS::EC2::SecurityGroup::Id
     Description: Existing Lambda security group allowed to reach Aurora PostgreSQL.
 
+  LambdaExecutionRoleArn:
+    Type: String
+    Description: Existing IAM role assumed by the Lambda function (created outside this stack; not imported).
+
 Resources:
   TokenQueryHttpApi:
     Type: AWS::Serverless::HttpApi
+    DeletionPolicy: Retain
     Properties:
-      Name: !Sub "${AWS::StackName}-http-api"
+      Name: token-query-http-api
       StageName: "$default"
       FailOnWarnings: true
 
   TokenQueryFunction:
     Type: AWS::Serverless::Function
+    DeletionPolicy: Retain
     Properties:
+      FunctionName: token-query-function
       Description: Token Query API running on AWS Lambda.
       CodeUri: apps/server/dist/
       Handler: lambda.handler
+      Role: !Ref LambdaExecutionRoleArn
       LoggingConfig:
         LogFormat: Text
         LogGroup: !Ref TokenQueryFunctionLogGroup
@@ -67,9 +75,6 @@ Resources:
           DATABASE_URL: !Ref DatabaseUrl
           INTERNAL_PROXY_TOKEN: !Ref InternalProxyToken
           ADMIN_MIGRATION_TOKEN: !Ref AdminMigrationToken
-      Policies:
-        - AWSLambdaBasicExecutionRole
-        - AWSLambdaVPCAccessExecutionRole
       Events:
         ProxyApi:
           Type: HttpApi
@@ -80,8 +85,9 @@ Resources:
 
   TokenQueryFunctionLogGroup:
     Type: AWS::Logs::LogGroup
+    DeletionPolicy: Retain
     Properties:
-      LogGroupName: !Sub "/aws/lambda/${AWS::StackName}-api"
+      LogGroupName: /aws/lambda/token-query-function
       RetentionInDays: 14
 
 Outputs:
