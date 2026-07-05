@@ -12,7 +12,6 @@ stack_name = "token-query-api"
 resolve_s3 = true
 s3_prefix = "token-query-api"
 region = "us-west-2"
-profile = "default"
 confirm_changeset = true
 capabilities = "CAPABILITY_IAM"
 parameter_overrides = "CorsOrigin=\"https://app.doyouadoreme.online\" PrivateSubnetIds=\"subnet-0733f030693829d94,subnet-0a5b4b26959047941\" LambdaSecurityGroupId=\"sg-09a462643a2e9b6c0\""
