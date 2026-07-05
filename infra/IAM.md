@@ -86,7 +86,7 @@ aws iam create-open-id-connect-provider \
 | 变了什么 | 要同步改的地方 |
 |---|---|
 | **Aurora 集群被删了重建** | endpoint 域名会变——不用手动同步，`db-template.yaml` 会自动发布到 SSM `/token-query/db/cluster-endpoint`，`api` 层自动读取 |
-| **`token-query-api` stack 被删了重建**（HTTP API 是全新的 ApiId，自定义域名的 regional target 也会变） | **Cloudflare 那边要手动同步两处**：① `api.doyouadoreme.online` 这条 CNAME 记录，改成新的 `ApiGatewayDomainName`（查法：`aws apigatewayv2 get-domain-name --domain-name api.doyouadoreme.online --region us-west-2 --query 'DomainNameConfigurations[0].ApiGatewayDomainName'`）；② Cloudflare Worker 里手工维护的 `LAMBDA_API_ORIGIN` 环境变量，同步成新的 API 地址 |
+| **`token-query-api` stack 被删了重建**（HTTP API 是全新的 ApiId，自定义域名的 regional target 也会变） | **Cloudflare 那边要手动同步两处，且用的是两个不同的地址**：① `api.doyouadoreme.online` 这条 CNAME 记录，改成新的 `ApiGatewayDomainName`（`d-xxxxx.execute-api...` 这种；查法：`aws apigatewayv2 get-domain-name --domain-name api.doyouadoreme.online --region us-west-2 --query 'DomainNameConfigurations[0].ApiGatewayDomainName'`）；② GitHub Variables 里的 `LAMBDA_API_ORIGIN`（Cloudflare Worker 部署时写入），改成新的裸 `ApiEndpoint`（`https://<api-id>.execute-api...` 这种，**不能填自定义域名**——Worker 内部 fetch 自定义域名会因为同账号下的 Cloudflare 代理循环被拦截报错；查法：`aws apigatewayv2 get-apis --region us-west-2 --query "Items[?Name=='token-query-http-api'].ApiEndpoint" --output text`）|
 
 ---
 

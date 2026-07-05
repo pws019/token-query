@@ -206,15 +206,26 @@ aws apigatewayv2 get-domain-name \
 
 去 Cloudflare 控制台，把 `api.doyouadoreme.online` 这条 CNAME 记录的目标值改成上面查出来的新值。
 
-### 2. Cloudflare Worker 里手工维护的 `LAMBDA_API_ORIGIN`
+### 2. Cloudflare Worker 里的 `LAMBDA_API_ORIGIN`（GitHub Variable，部署 Worker 时写入）
 
-这个变量存在 Cloudflare Worker 自己的环境变量/Secret 里（不在这个仓库的 GitHub Secrets 里），指向 API 的公网地址。`token-query-api` 重建后，不管是 `ApiEndpoint`（裸的 execute-api 地址，ApiId 每次重建都变）还是自定义域名，只要 Worker 配置的是前者就必须同步；如果 Worker 配置的是自定义域名 `https://api.doyouadoreme.online`，理论上不用改（域名字符串没变），但**保险起见，改完 CNAME 之后过去 Worker 里确认一下这个变量的值还是对的**。
+这个变量**必须填 AWS 裸的 `ApiEndpoint`**（`https://<api-id>.execute-api.us-west-2.amazonaws.com`），**不能填自定义域名** `https://api.doyouadoreme.online`。
+
+原因：`api.doyouadoreme.online` 在 Cloudflare 那边是代理状态（橙云）。Worker 内部用 `fetch()` 请求**同一个 Cloudflare 账号下、同样被代理的域名**时，Cloudflare 会当成潜在的自引用死循环直接拦截报错——这是 Cloudflare 的既定限制，不是配置错误。所以自定义域名 + ACM 证书这条通路，是留给外部直接访问 API 用的（比如手动测试），跟 Worker 内部代理用的地址是两回事，不要混。
+
+`token-query-api` 每次重建（`create-stack`，不是 `update-stack`），`ApiEndpoint` 的 `<api-id>` 都会变，查新值：
+
+```bash
+aws apigatewayv2 get-apis --region us-west-2 \
+  --query "Items[?Name=='token-query-http-api'].ApiEndpoint" --output text
+```
+
+查到之后去 GitHub 仓库 Variables 里把 `LAMBDA_API_ORIGIN` 改成这个值，然后重新跑一次 `Deploy Cloudflare Worker` 这个 workflow（改 Variable 本身不会自动重新部署，需要手动触发）。
 
 验证两处都同步好了：
 
 ```bash
 curl -i https://api.doyouadoreme.online/api/health   # 走 Cloudflare 代理，验证 CNAME
-# 再验证走 Worker 的完整业务路径（比如前端页面实际调用一次）
+curl -i https://app.doyouadoreme.online/             # 验证 Worker 代理链路（走前端实际调一次接口更准）
 ```
 
 ### （可选）连 SAM 的托管 bucket 一起清
@@ -282,3 +293,4 @@ aws cloudformation execute-change-set \
 - **合并/精简多个 `DeletionPolicy: Retain` 的资源时，不用严格按"先改 Delete 再移除"两步走**：直接把要合并掉的资源从模板里删掉，CloudFormation 会因为 `Retain` 只是取消托管（不会删真实资源），旧的和新合并的会短暂同时存在（权限是并集，不冲突）；然后直接用对应服务的原生 API（比如 `aws iam delete-role-policy`）把这些已经不被任何 stack 管理的旧资源手动清掉，比在 CFN 里来回折腾两次 change set 更省事。
 - **`apigateway:TagResource`/`UntagResource` 是独立的 IAM action**，不归 `apigateway:GET`/`POST`/`PUT`/`PATCH`/`DELETE` 这几个"动词"权限管——SAM 给 HttpApi Stage 打 stack 标签时会调用它，缺了会在 `CREATE_FAILED` 里看到 `apigateway:TagResource ... AccessDenied`。
 - **`logs:DeleteLogGroup` 跟 `CreateLogGroup`/`PutRetentionPolicy`/`TagResource` 是分开粒度的权限**，容易补权限时漏掉这一个——直到某次 rollback 需要删日志组才会暴露出来（`ROLLBACK_FAILED`）。补权限时記得把某个资源的增删改查动作一次性配全，不要只补当时报错的那一个。
+- **Cloudflare Worker 不能 `fetch()` 同一个账号下、同样被代理（橙云）的域名**——会被 Cloudflare 当成潜在死循环直接拦截报错。这就是为什么 `LAMBDA_API_ORIGIN` 必须填 AWS 裸的 `ApiEndpoint`，不能填 `api.doyouadoreme.online` 这个自定义域名，哪怕它看起来"更正式"。自定义域名 + ACM 证书这条通路是留给外部直接调用的，跟 Worker 内部代理走的地址是两回事。
