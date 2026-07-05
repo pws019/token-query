@@ -30,6 +30,7 @@ jobs:
       PRIVATE_SUBNET_IDS_SSM_PARAM: ${{ vars.PRIVATE_SUBNET_IDS_SSM_PARAM || '/token-query/network/private-subnet-ids' }}
       LAMBDA_SECURITY_GROUP_ID_SSM_PARAM: ${{ vars.LAMBDA_SECURITY_GROUP_ID_SSM_PARAM || '/token-query/network/lambda-security-group-id' }}
       LAMBDA_EXECUTION_ROLE_ARN: ${{ vars.LAMBDA_EXECUTION_ROLE_ARN || 'arn:aws:iam::707605822527:role/service-role/token-query-function-role-qsx6aji9' }}
+      CERTIFICATE_ARN: ${{ vars.CERTIFICATE_ARN || 'arn:aws:acm:us-west-2:707605822527:certificate/6dd559f1-2c41-43ab-823a-ba094199fcb1' }}
 
     steps:
       - name: Checkout
@@ -67,6 +68,7 @@ jobs:
           test -n "$PRIVATE_SUBNET_IDS_SSM_PARAM"
           test -n "$LAMBDA_SECURITY_GROUP_ID_SSM_PARAM"
           test -n "$LAMBDA_EXECUTION_ROLE_ARN"
+          test -n "$CERTIFICATE_ARN"
 
       - name: Check server types
         run: pnpm --filter server check-types
@@ -99,6 +101,7 @@ jobs:
             "PrivateSubnetIds=$PRIVATE_SUBNET_IDS_SSM_PARAM"
             "LambdaSecurityGroupId=$LAMBDA_SECURITY_GROUP_ID_SSM_PARAM"
             "LambdaExecutionRoleArn=$LAMBDA_EXECUTION_ROLE_ARN"
+            "CertificateArn=$CERTIFICATE_ARN"
           )
 
           if [ -n "$ADMIN_MIGRATION_TOKEN" ]; then

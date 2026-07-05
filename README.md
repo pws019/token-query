@@ -100,6 +100,7 @@ CORS_ORIGIN=https://app.doyouadoreme.online
 PRIVATE_SUBNET_IDS_SSM_PARAM=/token-query/network/private-subnet-ids
 LAMBDA_SECURITY_GROUP_ID_SSM_PARAM=/token-query/network/lambda-security-group-id
 LAMBDA_EXECUTION_ROLE_ARN=arn:aws:iam::<account-id>:role/service-role/<lambda-execution-role>
+CERTIFICATE_ARN=arn:aws:acm:<region>:<account-id>:certificate/<certificate-id>
 ```
 
 These are SSM parameter paths, not literal resource IDs - `infra/network-template.yaml` publishes the actual values there on every network stack deploy, and CloudFormation resolves them live when the API stack deploys.
