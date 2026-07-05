@@ -23,7 +23,7 @@ Parameters:
 Resources:
   DbSg:
     Type: AWS::EC2::SecurityGroup
-    DeletionPolicy: Retain
+    DeletionPolicy: Delete
     Properties:
       GroupDescription: Security group for database
       VpcId: !Ref VpcId
@@ -39,14 +39,14 @@ Resources:
 
   DbSubnetGroup:
     Type: AWS::RDS::DBSubnetGroup
-    DeletionPolicy: Retain
+    DeletionPolicy: Delete
     Properties:
       DBSubnetGroupDescription: token-query-db-subnet-group
       SubnetIds: !Ref PrivateSubnetIds
 
   DbCluster:
     Type: AWS::RDS::DBCluster
-    DeletionPolicy: Retain
+    DeletionPolicy: Delete
     Properties:
       DBClusterIdentifier: token-query-db
       Engine: aurora-postgresql
@@ -60,7 +60,7 @@ Resources:
       PreferredMaintenanceWindow: "fri:11:01-fri:11:31"
       StorageEncrypted: true
       KmsKeyId: arn:aws:kms:us-west-2:707605822527:key/3ffdc804-00ec-4c7e-8365-db9940980712
-      DeletionProtection: true
+      DeletionProtection: false
       CopyTagsToSnapshot: true
       ServerlessV2ScalingConfiguration:
         MinCapacity: 0.5
@@ -71,7 +71,7 @@ Resources:
 
   DbInstance:
     Type: AWS::RDS::DBInstance
-    DeletionPolicy: Retain
+    DeletionPolicy: Delete
     Properties:
       DBInstanceIdentifier: token-query-db-instance-1
       DBInstanceClass: db.serverless

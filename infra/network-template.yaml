@@ -7,7 +7,7 @@ Description: >
 Resources:
   Vpc:
     Type: AWS::EC2::VPC
-    DeletionPolicy: Retain
+    DeletionPolicy: Delete
     Properties:
       CidrBlock: 10.0.0.0/16
       Tags:
@@ -16,7 +16,7 @@ Resources:
 
   PublicSubnet:
     Type: AWS::EC2::Subnet
-    DeletionPolicy: Retain
+    DeletionPolicy: Delete
     Properties:
       VpcId: !Ref Vpc
       CidrBlock: 10.0.1.0/24
@@ -27,7 +27,7 @@ Resources:
 
   PrivateSubnet1:
     Type: AWS::EC2::Subnet
-    DeletionPolicy: Retain
+    DeletionPolicy: Delete
     Properties:
       VpcId: !Ref Vpc
       CidrBlock: 10.0.2.0/24
@@ -38,7 +38,7 @@ Resources:
 
   PrivateSubnet2:
     Type: AWS::EC2::Subnet
-    DeletionPolicy: Retain
+    DeletionPolicy: Delete
     Properties:
       VpcId: !Ref Vpc
       CidrBlock: 10.0.3.0/24
@@ -49,7 +49,7 @@ Resources:
 
   Igw:
     Type: AWS::EC2::InternetGateway
-    DeletionPolicy: Retain
+    DeletionPolicy: Delete
     Properties:
       Tags:
         - Key: Name
@@ -57,20 +57,20 @@ Resources:
 
   IgwAttachment:
     Type: AWS::EC2::VPCGatewayAttachment
-    DeletionPolicy: Retain
+    DeletionPolicy: Delete
     Properties:
       VpcId: !Ref Vpc
       InternetGatewayId: !Ref Igw
 
   NatEip:
     Type: AWS::EC2::EIP
-    DeletionPolicy: Retain
+    DeletionPolicy: Delete
     Properties:
       Domain: vpc
 
   NatGateway:
     Type: AWS::EC2::NatGateway
-    DeletionPolicy: Retain
+    DeletionPolicy: Delete
     Properties:
       SubnetId: !Ref PublicSubnet
       AllocationId: !GetAtt NatEip.AllocationId
@@ -80,7 +80,7 @@ Resources:
 
   PublicRouteTable:
     Type: AWS::EC2::RouteTable
-    DeletionPolicy: Retain
+    DeletionPolicy: Delete
     Properties:
       VpcId: !Ref Vpc
       Tags:
@@ -89,7 +89,7 @@ Resources:
 
   PrivateRouteTable:
     Type: AWS::EC2::RouteTable
-    DeletionPolicy: Retain
+    DeletionPolicy: Delete
     Properties:
       VpcId: !Ref Vpc
       Tags:
@@ -98,7 +98,7 @@ Resources:
 
   PublicRoute:
     Type: AWS::EC2::Route
-    DeletionPolicy: Retain
+    DeletionPolicy: Delete
     Properties:
       RouteTableId: !Ref PublicRouteTable
       DestinationCidrBlock: 0.0.0.0/0
@@ -106,7 +106,7 @@ Resources:
 
   PrivateRoute:
     Type: AWS::EC2::Route
-    DeletionPolicy: Retain
+    DeletionPolicy: Delete
     Properties:
       RouteTableId: !Ref PrivateRouteTable
       DestinationCidrBlock: 0.0.0.0/0
@@ -114,28 +114,28 @@ Resources:
 
   PublicSubnetRouteTableAssociation:
     Type: AWS::EC2::SubnetRouteTableAssociation
-    DeletionPolicy: Retain
+    DeletionPolicy: Delete
     Properties:
       SubnetId: !Ref PublicSubnet
       RouteTableId: !Ref PublicRouteTable
 
   PrivateSubnet1RouteTableAssociation:
     Type: AWS::EC2::SubnetRouteTableAssociation
-    DeletionPolicy: Retain
+    DeletionPolicy: Delete
     Properties:
       SubnetId: !Ref PrivateSubnet1
       RouteTableId: !Ref PrivateRouteTable
 
   PrivateSubnet2RouteTableAssociation:
     Type: AWS::EC2::SubnetRouteTableAssociation
-    DeletionPolicy: Retain
+    DeletionPolicy: Delete
     Properties:
       SubnetId: !Ref PrivateSubnet2
       RouteTableId: !Ref PrivateRouteTable
 
   LambdaSg:
     Type: AWS::EC2::SecurityGroup
-    DeletionPolicy: Retain
+    DeletionPolicy: Delete
     Properties:
       GroupDescription: Security group for Lambda functions
       VpcId: !Ref Vpc

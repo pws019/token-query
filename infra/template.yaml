@@ -53,7 +53,7 @@ Parameters:
 Resources:
   TokenQueryHttpApi:
     Type: AWS::Serverless::HttpApi
-    DeletionPolicy: Retain
+    DeletionPolicy: Delete
     Properties:
       Name: token-query-http-api
       StageName: "$default"
@@ -61,7 +61,7 @@ Resources:
 
   TokenQueryFunction:
     Type: AWS::Serverless::Function
-    DeletionPolicy: Retain
+    DeletionPolicy: Delete
     Properties:
       FunctionName: token-query-function
       Description: Token Query API running on AWS Lambda.
@@ -91,14 +91,14 @@ Resources:
 
   TokenQueryFunctionLogGroup:
     Type: AWS::Logs::LogGroup
-    DeletionPolicy: Retain
+    DeletionPolicy: Delete
     Properties:
       LogGroupName: /aws/lambda/token-query-function
       RetentionInDays: 14
 
   ApiDomainName:
     Type: AWS::ApiGatewayV2::DomainName
-    DeletionPolicy: Retain
+    DeletionPolicy: Delete
     Properties:
       DomainName: api.doyouadoreme.online
       DomainNameConfigurations:
@@ -107,7 +107,7 @@ Resources:
 
   ApiMapping:
     Type: AWS::ApiGatewayV2::ApiMapping
-    DeletionPolicy: Retain
+    DeletionPolicy: Delete
     Properties:
       ApiId: !Ref TokenQueryHttpApi
       DomainName: !Ref ApiDomainName
