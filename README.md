@@ -97,18 +97,23 @@ Configure these GitHub repository variables:
 AWS_REGION=us-west-2
 SAM_STACK_NAME=token-query-api
 CORS_ORIGIN=https://app.doyouadoreme.online
-PRIVATE_SUBNET_IDS=subnet-0733f030693829d94,subnet-0a5b4b26959047941
-LAMBDA_SECURITY_GROUP_ID=sg-09a462643a2e9b6c0
+PRIVATE_SUBNET_IDS_SSM_PARAM=/token-query/network/private-subnet-ids
+LAMBDA_SECURITY_GROUP_ID_SSM_PARAM=/token-query/network/lambda-security-group-id
+LAMBDA_EXECUTION_ROLE_ARN=arn:aws:iam::<account-id>:role/service-role/<lambda-execution-role>
 ```
+
+These are SSM parameter paths, not literal resource IDs - `infra/network-template.yaml` publishes the actual values there on every network stack deploy, and CloudFormation resolves them live when the API stack deploys.
 
 Configure these GitHub repository secrets:
 
 ```text
 AWS_DEPLOY_ROLE_ARN=arn:aws:iam::<account-id>:role/<github-actions-lambda-deploy-role>
-DATABASE_URL=postgresql://...
+DB_PASSWORD=<aurora-master-password>   # must match DbMasterPassword used to deploy infra/db-template.yaml
 INTERNAL_PROXY_TOKEN=shared-secret-with-cloudflare-worker
 ADMIN_MIGRATION_TOKEN=temporary-admin-token   # optional; clear after database initialization
 ```
+
+`DATABASE_URL` is no longer a stored secret - the API stack builds it at deploy time from `DB_PASSWORD` plus the Aurora endpoint it reads live from the `/token-query/db/cluster-endpoint` SSM parameter (published by `infra/db-template.yaml`). This means the connection string always points at whatever Aurora endpoint currently exists, even after the DB stack is torn down and recreated (recreating gives the cluster a new endpoint hostname; only the password needs to stay in sync).
 
 The recommended AWS credential flow is GitHub OIDC. Because SAM deploys through CloudFormation and creates Lambda/API Gateway resources, the IAM role used by `AWS_DEPLOY_ROLE_ARN` needs CloudFormation, S3 artifact, Lambda, API Gateway, IAM role, logs, and VPC attachment permissions.
 

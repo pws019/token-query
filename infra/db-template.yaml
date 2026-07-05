@@ -20,6 +20,11 @@ Parameters:
     Default: /token-query/network/lambda-security-group-id
     Description: Lambda security group, resolved live from the token-query-network stack's SSM parameter on every deploy.
 
+  DbMasterPassword:
+    Type: String
+    NoEcho: true
+    Description: Master password for the Aurora cluster. Keep this in sync with the DB_PASSWORD secret used by the API stack's deploy pipeline.
+
 Resources:
   DbSg:
     Type: AWS::EC2::SecurityGroup
@@ -52,6 +57,7 @@ Resources:
       Engine: aurora-postgresql
       EngineVersion: "17.7"
       MasterUsername: postgres
+      MasterUserPassword: !Ref DbMasterPassword
       DBSubnetGroupName: !Ref DbSubnetGroup
       VpcSecurityGroupIds:
         - !Ref DbSg
@@ -68,6 +74,13 @@ Resources:
       Tags:
         - Key: Project
           Value: token-query
+
+  DbClusterEndpointParam:
+    Type: AWS::SSM::Parameter
+    Properties:
+      Name: /token-query/db/cluster-endpoint
+      Type: String
+      Value: !GetAtt DbCluster.Endpoint.Address
 
   DbInstance:
     Type: AWS::RDS::DBInstance

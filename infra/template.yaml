@@ -19,9 +19,15 @@ Parameters:
     Type: String
     Default: https://app.doyouadoreme.online
 
-  DatabaseUrl:
+  DbClusterEndpoint:
+    Type: AWS::SSM::Parameter::Value<String>
+    Default: /token-query/db/cluster-endpoint
+    Description: Aurora cluster endpoint, resolved live from the token-query-db stack's SSM parameter on every deploy.
+
+  DbPassword:
     Type: String
     NoEcho: true
+    Description: Aurora master password. Must match the DbMasterPassword used to deploy the token-query-db stack.
 
   InternalProxyToken:
     Type: String
@@ -78,7 +84,7 @@ Resources:
       Environment:
         Variables:
           CORS_ORIGIN: !Ref CorsOrigin
-          DATABASE_URL: !Ref DatabaseUrl
+          DATABASE_URL: !Sub "postgresql://postgres:${DbPassword}@${DbClusterEndpoint}:5432/postgres?sslmode=require&uselibpqcompat=true"
           INTERNAL_PROXY_TOKEN: !Ref InternalProxyToken
           ADMIN_MIGRATION_TOKEN: !Ref AdminMigrationToken
       Events:
@@ -108,6 +114,7 @@ Resources:
   ApiMapping:
     Type: AWS::ApiGatewayV2::ApiMapping
     DeletionPolicy: Delete
+    DependsOn: TokenQueryHttpApiApiGatewayDefaultStage
     Properties:
       ApiId: !Ref TokenQueryHttpApi
       DomainName: !Ref ApiDomainName
