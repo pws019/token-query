@@ -45,11 +45,11 @@ jobs:
 
       - name: Check Lambda deployment settings
         env:
-          AWS_ROLE_TO_ASSUME: ${{ secrets.AWS_ROLE_TO_ASSUME }}
+          AWS_DEPLOY_ROLE_ARN: ${{ secrets.AWS_DEPLOY_ROLE_ARN }}
         run: |
           test -n "$AWS_REGION"
           test -n "$LAMBDA_FUNCTION_NAME"
-          test -n "$AWS_ROLE_TO_ASSUME"
+          test -n "$AWS_DEPLOY_ROLE_ARN"
 
       - name: Check server types
         run: pnpm --filter server check-types
@@ -64,7 +64,7 @@ jobs:
       - name: Configure AWS credentials
         uses: aws-actions/configure-aws-credentials@v4
         with:
-          role-to-assume: ${{ secrets.AWS_ROLE_TO_ASSUME }}
+          role-to-assume: ${{ secrets.AWS_DEPLOY_ROLE_ARN }}
           aws-region: ${{ env.AWS_REGION }}
 
       - name: Deploy Lambda code

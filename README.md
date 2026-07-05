@@ -102,10 +102,10 @@ LAMBDA_FUNCTION_NAME=token-query-function
 Configure this GitHub repository secret:
 
 ```text
-AWS_ROLE_TO_ASSUME=arn:aws:iam::<account-id>:role/<github-actions-lambda-deploy-role>
+AWS_DEPLOY_ROLE_ARN=arn:aws:iam::<account-id>:role/<github-actions-lambda-deploy-role>
 ```
 
-The recommended AWS credential flow is GitHub OIDC. The IAM role used by `AWS_ROLE_TO_ASSUME` needs permission to update and read the existing Lambda function:
+The recommended AWS credential flow is GitHub OIDC. The IAM role used by `AWS_DEPLOY_ROLE_ARN` needs permission to update and read the existing Lambda function:
 
 ```json
 {
