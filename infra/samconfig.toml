@@ -14,5 +14,5 @@ s3_prefix = "token-query-api"
 region = "us-west-2"
 confirm_changeset = true
 capabilities = "CAPABILITY_IAM"
-parameter_overrides = "CorsOrigin=\"https://app.doyouadoreme.online\" PrivateSubnetIds=\"/token-query/network/private-subnet-ids\" LambdaSecurityGroupId=\"/token-query/network/lambda-security-group-id\" LambdaExecutionRoleArn=\"arn:aws:iam::707605822527:role/service-role/token-query-function-role-qsx6aji9\" CertificateArn=\"arn:aws:acm:us-west-2:707605822527:certificate/6dd559f1-2c41-43ab-823a-ba094199fcb1\""
+parameter_overrides = "CorsOrigin=\"https://app.doyouadoreme.online\" PrivateSubnetIds=\"/token-query/network/private-subnet-ids\" LambdaSecurityGroupId=\"/token-query/network/lambda-security-group-id\" LambdaExecutionRoleArn=\"/token-query/iam/lambda-execution-role-arn\" CertificateArn=\"arn:aws:acm:us-west-2:707605822527:certificate/6dd559f1-2c41-43ab-823a-ba094199fcb1\""
 image_repositories = []

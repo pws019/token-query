@@ -1,0 +1,26 @@
+  {
+    "version": "2.0",
+    "routeKey": "ANY /{proxy+}",
+    "rawPath": "/api/admin/db/init",
+    "rawQueryString": "",
+    "headers": {
+      "host": "api.doyouadoreme.online",
+      "x-forwarded-proto": "https",
+      "content-type": "application/json",
+      "X-Internal-Proxy-Token": "123",
+      "X-Admin-Migration-Token": "123"
+    },
+    "requestContext": {
+      "http": {
+        "method": "POST",
+        "path": "/api/admin/db/init",
+        "protocol": "HTTP/1.1",
+        "sourceIp": "127.0.0.1",
+        "userAgent": "lambda-test-console"
+      },
+      "domainName": "api.doyouadoreme.online",
+      "stage": "$default"
+    },
+    "isBase64Encoded": false,
+    "body": null
+  }

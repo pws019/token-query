@@ -49,8 +49,9 @@ Parameters:
     Description: Lambda security group, resolved live from the token-query-network stack's SSM parameter on every deploy.
 
   LambdaExecutionRoleArn:
-    Type: String
-    Description: Existing IAM role assumed by the Lambda function (created outside this stack; not imported).
+    Type: AWS::SSM::Parameter::Value<String>
+    Default: /token-query/iam/lambda-execution-role-arn
+    Description: Lambda execution role ARN, resolved live from the token-query-iam stack's SSM parameter on every deploy.
 
   CertificateArn:
     Type: String

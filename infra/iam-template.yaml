@@ -1,0 +1,214 @@
+AWSTemplateFormatVersion: "2010-09-09"
+Description: >
+  Token Query IAM layer (GitHub OIDC provider, GitHub Actions deploy role,
+  Lambda execution role). Deploy manually, never from an auto-triggered CI
+  pipeline - this stack defines the permissions the CI pipeline itself runs
+  with, so it must never depend on that same pipeline to update itself.
+
+Resources:
+  GitHubOidcProvider:
+    Type: AWS::IAM::OIDCProvider
+    DeletionPolicy: Delete
+    Properties:
+      Url: https://token.actions.githubusercontent.com
+      ClientIdList:
+        - sts.amazonaws.com
+      ThumbprintList:
+        - 22ff89586561fc2d52f77491e9f1eff1b80be33e
+
+  DeployRole:
+    Type: AWS::IAM::Role
+    DeletionPolicy: Delete
+    Properties:
+      RoleName: github-actions-token-query-deploy-role
+      AssumeRolePolicyDocument:
+        Version: "2012-10-17"
+        Statement:
+          - Effect: Allow
+            Principal:
+              Federated: !Ref GitHubOidcProvider
+            Action: sts:AssumeRoleWithWebIdentity
+            Condition:
+              StringEquals:
+                token.actions.githubusercontent.com:aud: sts.amazonaws.com
+              StringLike:
+                token.actions.githubusercontent.com:sub:
+                  - "repo:pws019/token-query:*"
+
+  DeployRoleLambdaDeployPolicy:
+    Type: AWS::IAM::RolePolicy
+    DeletionPolicy: Delete
+    Properties:
+      RoleName: !Ref DeployRole
+      PolicyName: token-query-lambda-deploy-policy
+      PolicyDocument:
+        Version: "2012-10-17"
+        Statement:
+          - Sid: UpdateTokenQueryLambdaCode
+            Effect: Allow
+            Action:
+              - lambda:UpdateFunctionCode
+              - lambda:GetFunction
+              - lambda:GetFunctionConfiguration
+              - lambda:UpdateFunctionConfiguration
+            Resource: arn:aws:lambda:us-west-2:707605822527:function:token-query-function
+          - Sid: ReadLambdaDeploymentStatus
+            Effect: Allow
+            Action:
+              - lambda:GetAccountSettings
+            Resource: "*"
+
+  DeployRoleSamDeployPolicy:
+    Type: AWS::IAM::RolePolicy
+    DeletionPolicy: Delete
+    Properties:
+      RoleName: !Ref DeployRole
+      PolicyName: token-query-sam-deploy-policy
+      PolicyDocument:
+        Version: "2012-10-17"
+        Statement:
+          - Sid: ManageSamCloudFormationStacks
+            Effect: Allow
+            Action:
+              - cloudformation:CreateChangeSet
+              - cloudformation:CreateStack
+              - cloudformation:DeleteChangeSet
+              - cloudformation:DescribeChangeSet
+              - cloudformation:DescribeStackEvents
+              - cloudformation:DescribeStackResource
+              - cloudformation:DescribeStackResources
+              - cloudformation:DescribeStacks
+              - cloudformation:ExecuteChangeSet
+              - cloudformation:GetTemplate
+              - cloudformation:GetTemplateSummary
+              - cloudformation:UpdateStack
+              - cloudformation:ValidateTemplate
+            Resource:
+              - arn:aws:cloudformation:us-west-2:707605822527:stack/token-query-api/*
+              - arn:aws:cloudformation:us-west-2:707605822527:stack/aws-sam-cli-managed-default/*
+              - arn:aws:cloudformation:us-west-2:aws:transform/Serverless-2016-10-31
+          - Sid: ManageSamArtifactsBucket
+            Effect: Allow
+            Action:
+              - s3:CreateBucket
+              - s3:DeleteBucket
+              - s3:DeleteBucketPolicy
+              - s3:DeleteObject
+              - s3:GetBucketLocation
+              - s3:GetBucketPolicy
+              - s3:GetBucketPublicAccessBlock
+              - s3:GetBucketVersioning
+              - s3:GetEncryptionConfiguration
+              - s3:GetObject
+              - s3:ListBucket
+              - s3:PutBucketPolicy
+              - s3:PutBucketPublicAccessBlock
+              - s3:PutBucketTagging
+              - s3:PutBucketVersioning
+              - s3:PutEncryptionConfiguration
+              - s3:PutObject
+            Resource:
+              - arn:aws:s3:::aws-sam-cli-managed-default-*
+              - arn:aws:s3:::aws-sam-cli-managed-default-*/*
+          - Sid: ManageSamLambdaFunctions
+            Effect: Allow
+            Action:
+              - lambda:AddPermission
+              - lambda:CreateFunction
+              - lambda:DeleteFunction
+              - lambda:GetFunction
+              - lambda:GetFunctionConfiguration
+              - lambda:RemovePermission
+              - lambda:TagResource
+              - lambda:UpdateFunctionCode
+              - lambda:UpdateFunctionConfiguration
+            Resource:
+              - arn:aws:lambda:us-west-2:707605822527:function:token-query-api-*
+              - arn:aws:lambda:us-west-2:707605822527:function:token-query-function
+          - Sid: ManageSamHttpApi
+            Effect: Allow
+            Action:
+              - apigateway:DELETE
+              - apigateway:GET
+              - apigateway:PATCH
+              - apigateway:POST
+              - apigateway:PUT
+              - apigateway:TagResource
+              - apigateway:UntagResource
+            Resource: arn:aws:apigateway:us-west-2::/*
+          - Sid: ManageSamExecutionRole
+            Effect: Allow
+            Action:
+              - iam:AttachRolePolicy
+              - iam:CreateRole
+              - iam:DeleteRole
+              - iam:DetachRolePolicy
+              - iam:GetRole
+              - iam:PassRole
+              - iam:TagRole
+            Resource: arn:aws:iam::707605822527:role/token-query-api-*
+          - Sid: PassTokenQueryFunctionExecutionRole
+            Effect: Allow
+            Action: iam:PassRole
+            Resource: !GetAtt LambdaExecutionRole.Arn
+            Condition:
+              StringEquals:
+                iam:PassedToService: lambda.amazonaws.com
+          - Sid: ManageSamLogGroups
+            Effect: Allow
+            Action:
+              - logs:CreateLogGroup
+              - logs:DeleteLogGroup
+              - logs:DescribeLogGroups
+              - logs:PutRetentionPolicy
+              - logs:TagResource
+            Resource:
+              - arn:aws:logs:us-west-2:707605822527:log-group:/aws/lambda/token-query-api-*
+              - arn:aws:logs:us-west-2:707605822527:log-group:/aws/lambda/token-query-function
+              - arn:aws:logs:us-west-2:707605822527:log-group:/aws/lambda/token-query-function:*
+          - Sid: ReadVpcConfiguration
+            Effect: Allow
+            Action:
+              - ec2:DescribeSecurityGroups
+              - ec2:DescribeSubnets
+              - ec2:DescribeVpcs
+            Resource: "*"
+          - Sid: ReadNetworkAndDbSsmParameters
+            Effect: Allow
+            Action:
+              - ssm:GetParameters
+              - ssm:GetParameter
+            Resource:
+              - arn:aws:ssm:us-west-2:707605822527:parameter/token-query/network/*
+              - arn:aws:ssm:us-west-2:707605822527:parameter/token-query/db/*
+              - arn:aws:ssm:us-west-2:707605822527:parameter/token-query/iam/*
+
+  LambdaExecutionRole:
+    Type: AWS::IAM::Role
+    DeletionPolicy: Delete
+    Properties:
+      RoleName: token-query-function-role-qsx6aji9
+      Path: /service-role/
+      AssumeRolePolicyDocument:
+        Version: "2012-10-17"
+        Statement:
+          - Effect: Allow
+            Principal:
+              Service: lambda.amazonaws.com
+            Action: sts:AssumeRole
+      ManagedPolicyArns:
+        - arn:aws:iam::707605822527:policy/service-role/AWSLambdaBasicExecutionRole-796dcfd1-97e7-4e37-9492-78bc4989d2ad
+        - arn:aws:iam::aws:policy/service-role/AWSLambdaVPCAccessExecutionRole
+
+  LambdaExecutionRoleArnParam:
+    Type: AWS::SSM::Parameter
+    Properties:
+      Name: /token-query/iam/lambda-execution-role-arn
+      Type: String
+      Value: !GetAtt LambdaExecutionRole.Arn
+
+Outputs:
+  DeployRoleArn:
+    Value: !GetAtt DeployRole.Arn
+  LambdaExecutionRoleArn:
+    Value: !GetAtt LambdaExecutionRole.Arn
