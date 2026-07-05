@@ -1,0 +1,90 @@
+AWSTemplateFormatVersion: "2010-09-09"
+Description: >
+  Token Query database layer (DB security group, DB subnet group, Aurora
+  PostgreSQL cluster). Depends on the token-query-network stack's outputs.
+  Deploy manually, never from an auto-triggered CI pipeline.
+
+Parameters:
+  VpcId:
+    Type: AWS::SSM::Parameter::Value<AWS::EC2::VPC::Id>
+    Default: /token-query/network/vpc-id
+    Description: VpcId, resolved live from the token-query-network stack's SSM parameter on every deploy.
+
+  PrivateSubnetIds:
+    Type: AWS::SSM::Parameter::Value<List<AWS::EC2::Subnet::Id>>
+    Default: /token-query/network/private-subnet-ids
+    Description: Private subnet IDs, resolved live from the token-query-network stack's SSM parameter on every deploy.
+
+  LambdaSecurityGroupId:
+    Type: AWS::SSM::Parameter::Value<AWS::EC2::SecurityGroup::Id>
+    Default: /token-query/network/lambda-security-group-id
+    Description: Lambda security group, resolved live from the token-query-network stack's SSM parameter on every deploy.
+
+Resources:
+  DbSg:
+    Type: AWS::EC2::SecurityGroup
+    DeletionPolicy: Retain
+    Properties:
+      GroupDescription: Security group for database
+      VpcId: !Ref VpcId
+      SecurityGroupIngress:
+        - IpProtocol: tcp
+          FromPort: 5432
+          ToPort: 5432
+          SourceSecurityGroupId: !Ref LambdaSecurityGroupId
+          Description: PostgreSQL 5432 from my-app-lambda-sg
+      Tags:
+        - Key: Name
+          Value: token-query-db-sg
+
+  DbSubnetGroup:
+    Type: AWS::RDS::DBSubnetGroup
+    DeletionPolicy: Retain
+    Properties:
+      DBSubnetGroupDescription: token-query-db-subnet-group
+      SubnetIds: !Ref PrivateSubnetIds
+
+  DbCluster:
+    Type: AWS::RDS::DBCluster
+    DeletionPolicy: Retain
+    Properties:
+      DBClusterIdentifier: token-query-db
+      Engine: aurora-postgresql
+      EngineVersion: "17.7"
+      MasterUsername: postgres
+      DBSubnetGroupName: !Ref DbSubnetGroup
+      VpcSecurityGroupIds:
+        - !Ref DbSg
+      BackupRetentionPeriod: 7
+      PreferredBackupWindow: "08:51-09:21"
+      PreferredMaintenanceWindow: "fri:11:01-fri:11:31"
+      StorageEncrypted: true
+      KmsKeyId: arn:aws:kms:us-west-2:707605822527:key/3ffdc804-00ec-4c7e-8365-db9940980712
+      DeletionProtection: true
+      CopyTagsToSnapshot: true
+      ServerlessV2ScalingConfiguration:
+        MinCapacity: 0.5
+        MaxCapacity: 2.0
+      Tags:
+        - Key: Project
+          Value: token-query
+
+  DbInstance:
+    Type: AWS::RDS::DBInstance
+    DeletionPolicy: Retain
+    Properties:
+      DBInstanceIdentifier: token-query-db-instance-1
+      DBInstanceClass: db.serverless
+      Engine: aurora-postgresql
+      DBClusterIdentifier: !Ref DbCluster
+      PubliclyAccessible: false
+      AutoMinorVersionUpgrade: true
+      Tags:
+        - Key: Project
+          Value: token-query
+
+Outputs:
+  DbClusterEndpoint:
+    Value: !GetAtt DbCluster.Endpoint.Address
+  DbSecurityGroupId:
+    Value: !Ref DbSg

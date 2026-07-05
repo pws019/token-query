@@ -11,8 +11,8 @@ on:
       - "pnpm-lock.yaml"
       - "pnpm-workspace.yaml"
       - "turbo.json"
-      - "template.yaml"
-      - "samconfig.toml"
+      - "infra/template.yaml"
+      - "infra/samconfig.toml"
       - ".github/workflows/deploy-lambda-api.yml"
   workflow_dispatch:
 
@@ -27,8 +27,8 @@ jobs:
       AWS_REGION: ${{ vars.AWS_REGION || 'us-west-2' }}
       SAM_STACK_NAME: ${{ vars.SAM_STACK_NAME || 'token-query-api' }}
       CORS_ORIGIN: ${{ vars.CORS_ORIGIN || 'https://app.doyouadoreme.online' }}
-      PRIVATE_SUBNET_IDS: ${{ vars.PRIVATE_SUBNET_IDS || 'subnet-0733f030693829d94,subnet-0a5b4b26959047941' }}
-      LAMBDA_SECURITY_GROUP_ID: ${{ vars.LAMBDA_SECURITY_GROUP_ID || 'sg-09a462643a2e9b6c0' }}
+      PRIVATE_SUBNET_IDS_SSM_PARAM: ${{ vars.PRIVATE_SUBNET_IDS_SSM_PARAM || '/token-query/network/private-subnet-ids' }}
+      LAMBDA_SECURITY_GROUP_ID_SSM_PARAM: ${{ vars.LAMBDA_SECURITY_GROUP_ID_SSM_PARAM || '/token-query/network/lambda-security-group-id' }}
       LAMBDA_EXECUTION_ROLE_ARN: ${{ vars.LAMBDA_EXECUTION_ROLE_ARN || 'arn:aws:iam::707605822527:role/service-role/token-query-function-role-qsx6aji9' }}
 
     steps:
@@ -64,8 +64,8 @@ jobs:
           test -n "$DATABASE_URL"
           test -n "$INTERNAL_PROXY_TOKEN"
           test -n "$CORS_ORIGIN"
-          test -n "$PRIVATE_SUBNET_IDS"
-          test -n "$LAMBDA_SECURITY_GROUP_ID"
+          test -n "$PRIVATE_SUBNET_IDS_SSM_PARAM"
+          test -n "$LAMBDA_SECURITY_GROUP_ID_SSM_PARAM"
           test -n "$LAMBDA_EXECUTION_ROLE_ARN"
 
       - name: Check server types
@@ -81,10 +81,10 @@ jobs:
           aws-region: ${{ env.AWS_REGION }}
 
       - name: Validate SAM template
-        run: sam validate --region "$AWS_REGION"
+        run: sam validate --template-file infra/template.yaml --region "$AWS_REGION"
 
       - name: Build SAM application
-        run: sam build --template-file template.yaml --cached --parallel
+        run: sam build --template-file infra/template.yaml --cached --parallel
 
       - name: Deploy SAM stack
         env:
@@ -96,8 +96,8 @@ jobs:
             "CorsOrigin=$CORS_ORIGIN"
             "DatabaseUrl=$DATABASE_URL"
             "InternalProxyToken=$INTERNAL_PROXY_TOKEN"
-            "PrivateSubnetIds=$PRIVATE_SUBNET_IDS"
-            "LambdaSecurityGroupId=$LAMBDA_SECURITY_GROUP_ID"
+            "PrivateSubnetIds=$PRIVATE_SUBNET_IDS_SSM_PARAM"
+            "LambdaSecurityGroupId=$LAMBDA_SECURITY_GROUP_ID_SSM_PARAM"
             "LambdaExecutionRoleArn=$LAMBDA_EXECUTION_ROLE_ARN"
           )
 

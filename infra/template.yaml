@@ -33,16 +33,22 @@ Parameters:
     Default: ""
 
   PrivateSubnetIds:
-    Type: List<AWS::EC2::Subnet::Id>
-    Description: Existing private subnet IDs used by the Lambda function.
+    Type: AWS::SSM::Parameter::Value<List<AWS::EC2::Subnet::Id>>
+    Default: /token-query/network/private-subnet-ids
+    Description: Private subnet IDs, resolved live from the token-query-network stack's SSM parameter on every deploy.
 
   LambdaSecurityGroupId:
-    Type: AWS::EC2::SecurityGroup::Id
-    Description: Existing Lambda security group allowed to reach Aurora PostgreSQL.
+    Type: AWS::SSM::Parameter::Value<AWS::EC2::SecurityGroup::Id>
+    Default: /token-query/network/lambda-security-group-id
+    Description: Lambda security group, resolved live from the token-query-network stack's SSM parameter on every deploy.
 
   LambdaExecutionRoleArn:
     Type: String
     Description: Existing IAM role assumed by the Lambda function (created outside this stack; not imported).
+
+  CertificateArn:
+    Type: String
+    Description: Existing ACM certificate ARN for the custom domain (ACM certs cannot be imported into CloudFormation; referenced by ARN only).
 
 Resources:
   TokenQueryHttpApi:
@@ -59,7 +65,7 @@ Resources:
     Properties:
       FunctionName: token-query-function
       Description: Token Query API running on AWS Lambda.
-      CodeUri: apps/server/dist/
+      CodeUri: ../apps/server/dist/
       Handler: lambda.handler
       Role: !Ref LambdaExecutionRoleArn
       LoggingConfig:
@@ -90,6 +96,23 @@ Resources:
       LogGroupName: /aws/lambda/token-query-function
       RetentionInDays: 14
 
+  ApiDomainName:
+    Type: AWS::ApiGatewayV2::DomainName
+    DeletionPolicy: Retain
+    Properties:
+      DomainName: api.doyouadoreme.online
+      DomainNameConfigurations:
+        - CertificateArn: !Ref CertificateArn
+          EndpointType: REGIONAL
+
+  ApiMapping:
+    Type: AWS::ApiGatewayV2::ApiMapping
+    DeletionPolicy: Retain
+    Properties:
+      ApiId: !Ref TokenQueryHttpApi
+      DomainName: !Ref ApiDomainName
+      Stage: "$default"
+
 Outputs:
   ApiEndpoint:
     Description: HTTP API endpoint for the Lambda API.
@@ -102,3 +125,7 @@ Outputs:
   FunctionArn:
     Description: Lambda function ARN managed by this SAM stack.
     Value: !GetAtt TokenQueryFunction.Arn
+
+  CustomDomainUrl:
+    Description: Custom domain endpoint for the Lambda API.
+    Value: !Sub "https://${ApiDomainName}"

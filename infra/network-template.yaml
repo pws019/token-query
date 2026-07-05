@@ -1,0 +1,173 @@
+AWSTemplateFormatVersion: "2010-09-09"
+Description: >
+  Token Query network layer (VPC, subnets, routing, NAT, Lambda security group).
+  Rarely changed on purpose - deploy this stack manually, never from an
+  auto-triggered CI pipeline.
+
+Resources:
+  Vpc:
+    Type: AWS::EC2::VPC
+    DeletionPolicy: Retain
+    Properties:
+      CidrBlock: 10.0.0.0/16
+      Tags:
+        - Key: Name
+          Value: token-query-vpc
+
+  PublicSubnet:
+    Type: AWS::EC2::Subnet
+    DeletionPolicy: Retain
+    Properties:
+      VpcId: !Ref Vpc
+      CidrBlock: 10.0.1.0/24
+      AvailabilityZone: us-west-2a
+      Tags:
+        - Key: Name
+          Value: my-sub-net-public-01
+
+  PrivateSubnet1:
+    Type: AWS::EC2::Subnet
+    DeletionPolicy: Retain
+    Properties:
+      VpcId: !Ref Vpc
+      CidrBlock: 10.0.2.0/24
+      AvailabilityZone: us-west-2b
+      Tags:
+        - Key: Name
+          Value: my-sub-net-private-01
+
+  PrivateSubnet2:
+    Type: AWS::EC2::Subnet
+    DeletionPolicy: Retain
+    Properties:
+      VpcId: !Ref Vpc
+      CidrBlock: 10.0.3.0/24
+      AvailabilityZone: us-west-2c
+      Tags:
+        - Key: Name
+          Value: my-sub-net-private-02
+
+  Igw:
+    Type: AWS::EC2::InternetGateway
+    DeletionPolicy: Retain
+    Properties:
+      Tags:
+        - Key: Name
+          Value: query-token-gatway
+
+  IgwAttachment:
+    Type: AWS::EC2::VPCGatewayAttachment
+    DeletionPolicy: Retain
+    Properties:
+      VpcId: !Ref Vpc
+      InternetGatewayId: !Ref Igw
+
+  NatEip:
+    Type: AWS::EC2::EIP
+    DeletionPolicy: Retain
+    Properties:
+      Domain: vpc
+
+  NatGateway:
+    Type: AWS::EC2::NatGateway
+    DeletionPolicy: Retain
+    Properties:
+      SubnetId: !Ref PublicSubnet
+      AllocationId: !GetAtt NatEip.AllocationId
+      Tags:
+        - Key: Name
+          Value: token-query-nat-gateway
+
+  PublicRouteTable:
+    Type: AWS::EC2::RouteTable
+    DeletionPolicy: Retain
+    Properties:
+      VpcId: !Ref Vpc
+      Tags:
+        - Key: Name
+          Value: query-token-public-rt
+
+  PrivateRouteTable:
+    Type: AWS::EC2::RouteTable
+    DeletionPolicy: Retain
+    Properties:
+      VpcId: !Ref Vpc
+      Tags:
+        - Key: Name
+          Value: token-query-private-rt
+
+  PublicRoute:
+    Type: AWS::EC2::Route
+    DeletionPolicy: Retain
+    Properties:
+      RouteTableId: !Ref PublicRouteTable
+      DestinationCidrBlock: 0.0.0.0/0
+      GatewayId: !Ref Igw
+
+  PrivateRoute:
+    Type: AWS::EC2::Route
+    DeletionPolicy: Retain
+    Properties:
+      RouteTableId: !Ref PrivateRouteTable
+      DestinationCidrBlock: 0.0.0.0/0
+      NatGatewayId: !Ref NatGateway
+
+  PublicSubnetRouteTableAssociation:
+    Type: AWS::EC2::SubnetRouteTableAssociation
+    DeletionPolicy: Retain
+    Properties:
+      SubnetId: !Ref PublicSubnet
+      RouteTableId: !Ref PublicRouteTable
+
+  PrivateSubnet1RouteTableAssociation:
+    Type: AWS::EC2::SubnetRouteTableAssociation
+    DeletionPolicy: Retain
+    Properties:
+      SubnetId: !Ref PrivateSubnet1
+      RouteTableId: !Ref PrivateRouteTable
+
+  PrivateSubnet2RouteTableAssociation:
+    Type: AWS::EC2::SubnetRouteTableAssociation
+    DeletionPolicy: Retain
+    Properties:
+      SubnetId: !Ref PrivateSubnet2
+      RouteTableId: !Ref PrivateRouteTable
+
+  LambdaSg:
+    Type: AWS::EC2::SecurityGroup
+    DeletionPolicy: Retain
+    Properties:
+      GroupDescription: Security group for Lambda functions
+      VpcId: !Ref Vpc
+      Tags:
+        - Key: Name
+          Value: token-query-lambda-sg
+
+  VpcIdParam:
+    Type: AWS::SSM::Parameter
+    Properties:
+      Name: /token-query/network/vpc-id
+      Type: String
+      Value: !Ref Vpc
+
+  PrivateSubnetIdsParam:
+    Type: AWS::SSM::Parameter
+    Properties:
+      Name: /token-query/network/private-subnet-ids
+      Type: StringList
+      Value: !Join [",", [!Ref PrivateSubnet1, !Ref PrivateSubnet2]]
+
+  LambdaSecurityGroupIdParam:
+    Type: AWS::SSM::Parameter
+    Properties:
+      Name: /token-query/network/lambda-security-group-id
+      Type: String
+      Value: !Ref LambdaSg
+
+Outputs:
+  VpcId:
+    Value: !Ref Vpc
+  PrivateSubnetIds:
+    Value: !Join [",", [!Ref PrivateSubnet1, !Ref PrivateSubnet2]]
+  LambdaSecurityGroupId:
+    Value: !Ref LambdaSg

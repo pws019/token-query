@@ -217,11 +217,12 @@ For local deployment, build the server before SAM packages the Lambda artifact:
 
 ```bash
 pnpm --filter server build
+cd infra
 sam build
 sam deploy
 ```
 
-`samconfig.toml` stores non-secret deployment defaults. Pass secret parameters through GitHub Actions secrets, `sam deploy --parameter-overrides`, or a future Secrets Manager/SSM integration.
+SAM templates and config live under `infra/`: `infra/template.yaml` (Lambda + HTTP API, deployed by CI), `infra/network-template.yaml` and `infra/db-template.yaml` (VPC/Aurora, deployed manually only - never wired into the auto-triggered pipeline). `infra/samconfig.toml` stores non-secret deployment defaults for the API stack. Pass secret parameters through GitHub Actions secrets, `sam deploy --parameter-overrides`, or a future Secrets Manager/SSM integration.
 
 The SAM stack outputs the new API endpoint as `ApiEndpoint`. After verifying `/api/health`, update the Cloudflare Worker `LAMBDA_API_ORIGIN` value to this endpoint when you are ready to cut traffic over from the manually created API Gateway.
 
