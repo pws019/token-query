@@ -16,6 +16,8 @@ import {
 import type { ReactNode } from "react";
 import { useState } from "react";
 
+import Header from "../components/header";
+
 import type { Route } from "./+types/profile";
 
 type GithubProfile = {
@@ -102,7 +104,9 @@ export default function Profile() {
   const isBusy = isQuerying || isDeleting;
 
   return (
-    <main className="min-h-full bg-[#f9f9ff] text-[#181c23]">
+    <div className="flex h-svh flex-col">
+      <Header />
+      <main className="min-h-0 flex-1 overflow-y-auto bg-[#f9f9ff] text-[#181c23]">
       <div className="mx-auto grid w-full max-w-[1200px] gap-6 px-5 py-6 sm:px-8 lg:grid-cols-[minmax(0,1fr)_320px] lg:py-8">
         <section className="min-w-0 space-y-6">
           <div className="rounded-2xl border border-[#c1c6d7] bg-white p-5 sm:p-6">
@@ -225,7 +229,8 @@ export default function Profile() {
           </div>
         </aside>
       </div>
-    </main>
+      </main>
+    </div>
   );
 }
 

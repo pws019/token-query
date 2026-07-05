@@ -23,18 +23,11 @@ export default function Header() {
 
         <nav className="flex items-center gap-2">
           <NavLink
-            to="/profile"
-            className={({ isActive }) =>
-              [
-                "inline-flex h-10 shrink-0 items-center justify-center rounded-xl border px-3 text-[13px] font-medium leading-[18px] transition-all active:scale-[0.98]",
-                isActive
-                  ? "border-[#0058bc]/35 bg-[#d8e2ff] text-[#0058bc]"
-                  : "border-[#c1c6d7]/70 bg-[#f9f9ff] text-[#414755] hover:border-[#0058bc]/35 hover:bg-[#f1f3fe] hover:text-[#0058bc]",
-              ].join(" ")
-            }
+            to="/"
+            className="inline-flex h-10 shrink-0 items-center justify-center rounded-xl border border-[#c1c6d7]/70 bg-[#f9f9ff] px-3 text-[13px] font-medium leading-[18px] text-[#414755] transition-all hover:border-[#0058bc]/35 hover:bg-[#f1f3fe] hover:text-[#0058bc] active:scale-[0.98]"
             end
           >
-            Profile
+            架构图
           </NavLink>
           <ModeToggle />
         </nav>
