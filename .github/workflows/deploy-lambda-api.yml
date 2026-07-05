@@ -90,6 +90,18 @@ jobs:
           INTERNAL_PROXY_TOKEN: ${{ secrets.INTERNAL_PROXY_TOKEN }}
           ADMIN_MIGRATION_TOKEN: ${{ secrets.ADMIN_MIGRATION_TOKEN }}
         run: |
+          PARAMETER_OVERRIDES=(
+            "CorsOrigin=$CORS_ORIGIN"
+            "DatabaseUrl=$DATABASE_URL"
+            "InternalProxyToken=$INTERNAL_PROXY_TOKEN"
+            "PrivateSubnetIds=$PRIVATE_SUBNET_IDS"
+            "LambdaSecurityGroupId=$LAMBDA_SECURITY_GROUP_ID"
+          )
+
+          if [ -n "$ADMIN_MIGRATION_TOKEN" ]; then
+            PARAMETER_OVERRIDES+=("AdminMigrationToken=$ADMIN_MIGRATION_TOKEN")
+          fi
+
           sam deploy \
             --stack-name "$SAM_STACK_NAME" \
             --region "$AWS_REGION" \
@@ -98,13 +110,7 @@ jobs:
             --capabilities CAPABILITY_IAM \
             --no-confirm-changeset \
             --no-fail-on-empty-changeset \
-            --parameter-overrides \
-              CorsOrigin="$CORS_ORIGIN" \
-              DatabaseUrl="$DATABASE_URL" \
-              InternalProxyToken="$INTERNAL_PROXY_TOKEN" \
-              AdminMigrationToken="$ADMIN_MIGRATION_TOKEN" \
-              PrivateSubnetIds="$PRIVATE_SUBNET_IDS" \
-              LambdaSecurityGroupId="$LAMBDA_SECURITY_GROUP_ID"
+            --parameter-overrides "${PARAMETER_OVERRIDES[@]}"
 
       - name: Show SAM outputs
         run: |
