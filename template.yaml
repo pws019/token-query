@@ -1,304 +1,98 @@
-AWSTemplateFormatVersion: '2010-09-09'
+AWSTemplateFormatVersion: "2010-09-09"
 Transform: AWS::Serverless-2016-10-31
-Description: Token Query Server
+Description: Token Query Lambda API. Phase 1 manages the API Lambda and HTTP API while referencing existing VPC and Aurora resources.
+
+Globals:
+  Function:
+    Runtime: nodejs22.x
+    Architectures:
+      - arm64
+    Timeout: 20
+    MemorySize: 128
+    Tracing: PassThrough
+    Environment:
+      Variables:
+        NODE_ENV: production
 
 Parameters:
+  CorsOrigin:
+    Type: String
+    Default: https://app.doyouadoreme.online
+
   DatabaseUrl:
     Type: String
     NoEcho: true
-    Default: postgresql://placeholder:placeholder@localhost:5432/placeholder
-    Description: PostgreSQL connection string for the deployed Lambda function.
-  CorsOrigin:
-    Type: String
-    Default: http://localhost:5173
-    Description: Allowed frontend origin, for example https://your-frontend-domain.example.com.
+
   InternalProxyToken:
     Type: String
     NoEcho: true
-    MinLength: 16
-    Description: Shared secret required on requests proxied from Cloudflare Worker to Lambda.
-  NodeEnv:
-    Type: String
-    Default: production
-    AllowedValues:
-      - development
-      - production
-      - test
-  DBName:
-    Type: String
-    Default: tokenquery
 
-  DBUsername:
-    Type: String
-    Default: app_user
-
-  DBPassword:
+  AdminMigrationToken:
     Type: String
     NoEcho: true
-    MinLength: 8
+    Default: ""
+
+  PrivateSubnetIds:
+    Type: List<AWS::EC2::Subnet::Id>
+    Description: Existing private subnet IDs used by the Lambda function.
+
+  LambdaSecurityGroupId:
+    Type: AWS::EC2::SecurityGroup::Id
+    Description: Existing Lambda security group allowed to reach Aurora PostgreSQL.
 
 Resources:
-  HonoApiFunction:
-    Type: AWS::Serverless::Function
-    Metadata:
-      BuildMethod: makefile
+  TokenQueryHttpApi:
+    Type: AWS::Serverless::HttpApi
     Properties:
-      CodeUri: .
+      Name: !Sub "${AWS::StackName}-http-api"
+      StageName: "$default"
+      FailOnWarnings: true
+
+  TokenQueryFunction:
+    Type: AWS::Serverless::Function
+    Properties:
+      Description: Token Query API running on AWS Lambda.
+      CodeUri: apps/server/dist/
       Handler: lambda.handler
-      Runtime: nodejs22.x
-      Timeout: 20
-      MemorySize: 512
-      Architectures:
-        - arm64
-      # 权限相关
-      Policies:
-        # 允许 Lambda 写 CloudWatch Logs 日志。
-        - arn:aws:iam::aws:policy/service-role/AWSLambdaBasicExecutionRole
-        # 这个是 Lambda 接入 VPC 必须用到的权限。
-        - arn:aws:iam::aws:policy/service-role/AWSLambdaVPCAccessExecutionRole
-      # VpcConfig:
-      #   SecurityGroupIds:
-      #     - !Ref LambdaSecurityGroup
-      #   SubnetIds:
-      #     - !Ref PrivateSubnetA
-      #     - !Ref PrivateSubnetB
+      LoggingConfig:
+        LogFormat: Text
+        LogGroup: !Ref TokenQueryFunctionLogGroup
+      VpcConfig:
+        SecurityGroupIds:
+          - !Ref LambdaSecurityGroupId
+        SubnetIds: !Ref PrivateSubnetIds
       Environment:
         Variables:
-          DATABASE_URL: !Sub
-            - "postgresql://${Username}:${Password}@${Host}:${Port}/${Database}"
-            - Username: !Ref DBUsername
-              Password: !Ref DBPassword
-              Host: !GetAtt AuroraCluster.Endpoint.Address
-              Port: !GetAtt AuroraCluster.Endpoint.Port
-              Database: !Ref DBName
           CORS_ORIGIN: !Ref CorsOrigin
+          DATABASE_URL: !Ref DatabaseUrl
           INTERNAL_PROXY_TOKEN: !Ref InternalProxyToken
-          NODE_ENV: production
+          ADMIN_MIGRATION_TOKEN: !Ref AdminMigrationToken
+      Policies:
+        - AWSLambdaBasicExecutionRole
+        - AWSLambdaVPCAccessExecutionRole
       Events:
-        Root:
+        ProxyApi:
           Type: HttpApi
           Properties:
-            Path: /
+            ApiId: !Ref TokenQueryHttpApi
             Method: ANY
-        Proxy:
-          Type: HttpApi
-          Properties:
             Path: /{proxy+}
-            Method: ANY
 
-  AppVpc:
-    Type: AWS::EC2::VPC
+  TokenQueryFunctionLogGroup:
+    Type: AWS::Logs::LogGroup
     Properties:
-      CidrBlock: 10.20.0.0/16
-      EnableDnsSupport: true
-      EnableDnsHostnames: true
-      Tags:
-        - Key: Name
-          Value: token-query-vpc
-
-  PublicSubnet:
-    Type: AWS::EC2::Subnet
-    Properties:
-      VpcId: !Ref AppVpc
-      CidrBlock: 10.20.1.0/24
-      AvailabilityZone: !Select [0, !GetAZs '']
-      MapPublicIpOnLaunch: true
-      Tags:
-        - Key: Name
-          Value: token-query-public-subnet
-
-  PrivateSubnetA:
-    Type: AWS::EC2::Subnet
-    Properties:
-      VpcId: !Ref AppVpc
-      CidrBlock: 10.20.2.0/24
-      AvailabilityZone: !Select [0, !GetAZs '']
-      MapPublicIpOnLaunch: false
-      Tags:
-        - Key: Name
-          Value: token-query-private-subnet-a
-
-  PrivateSubnetB:
-    Type: AWS::EC2::Subnet
-    Properties:
-      VpcId: !Ref AppVpc
-      CidrBlock: 10.20.3.0/24
-      AvailabilityZone: !Select [1, !GetAZs '']
-      MapPublicIpOnLaunch: false
-      Tags:
-        - Key: Name
-          Value: token-query-private-subnet-b
-
-  # 创建一个公网网关。
-  InternetGateway:
-    Type: AWS::EC2::InternetGateway
-    Properties:
-      Tags:
-        - Key: Name
-          Value: token-query-igw
-
-  # 把公网网关挂到你的 VPC 上。
-  AttachGateway:
-    Type: AWS::EC2::VPCGatewayAttachment
-    Properties:
-      VpcId: !Ref AppVpc
-      InternetGatewayId: !Ref InternetGateway
-
-  # 创建一张空的路由表
-  PublicRouteTable:
-    Type: AWS::EC2::RouteTable
-    Properties:
-      VpcId: !Ref AppVpc
-      Tags:
-        - Key: Name
-          Value: token-query-public-rt
-
-  # 路由表里添加一条规则，凡是访问公网的流量，都走 Internet Gateway
-  PublicDefaultRoute:
-    Type: AWS::EC2::Route
-    DependsOn: AttachGateway
-    Properties:
-      RouteTableId: !Ref PublicRouteTable
-      DestinationCidrBlock: 0.0.0.0/0
-      GatewayId: !Ref InternetGateway
-
-  # 把这个公网路由表绑定给 PublicSubnet
-  PublicSubnetRouteTableAssociation:
-    Type: AWS::EC2::SubnetRouteTableAssociation
-    Properties:
-      SubnetId: !Ref PublicSubnet
-      RouteTableId: !Ref PublicRouteTable
-
-  # 配置一个固定公网 IP
-  NatEip:
-    Type: AWS::EC2::EIP
-    DependsOn: AttachGateway
-    Properties:
-      Domain: vpc
-      Tags:
-        - Key: Name
-          Value: token-query-nat-eip
-
-  # Nat网关，让私网单向可以访问公网
-  NatGateway:
-    Type: AWS::EC2::NatGateway
-    Properties:
-      AllocationId: !GetAtt NatEip.AllocationId
-      SubnetId: !Ref PublicSubnet
-      Tags:
-        - Key: Name
-          Value: token-query-nat-gateway
-
-  # 子网的路由表
-  PrivateRouteTable:
-    Type: AWS::EC2::RouteTable
-    Properties:
-      VpcId: !Ref AppVpc
-      Tags:
-        - Key: Name
-          Value: token-query-private-rt
-
-  # 添加路由规则，可以通过nat访问公网
-  PrivateDefaultRoute:
-    Type: AWS::EC2::Route
-    Properties:
-      RouteTableId: !Ref PrivateRouteTable
-      DestinationCidrBlock: 0.0.0.0/0
-      NatGatewayId: !Ref NatGateway
-
-  # 对内子网A可以使用路由表走NAT出去
-  PrivateSubnetARouteTableAssociation:
-    Type: AWS::EC2::SubnetRouteTableAssociation
-    Properties:
-      SubnetId: !Ref PrivateSubnetA
-      RouteTableId: !Ref PrivateRouteTable
-  
-  # 对内子网B可以使用路由表走NAT出去
-  PrivateSubnetBRouteTableAssociation:
-    Type: AWS::EC2::SubnetRouteTableAssociation
-    Properties:
-      SubnetId: !Ref PrivateSubnetB
-      RouteTableId: !Ref PrivateRouteTable
-
-  # lambda的安全组，允许出站
-  LambdaSecurityGroup:
-    Type: AWS::EC2::SecurityGroup
-    Properties:
-      GroupDescription: Security group for Lambda
-      VpcId: !Ref AppVpc
-      SecurityGroupEgress:
-        - IpProtocol: -1
-          CidrIp: 0.0.0.0/0
-      Tags:
-        - Key: Name
-          Value: token-query-lambda-sg
-
-  # 数据库的安全组，允许LambdaSecurityGroup的安全组访问它。暴漏5432端口
-  DatabaseSecurityGroup:
-    Type: AWS::EC2::SecurityGroup
-    Properties:
-      GroupDescription: Security group for Aurora PostgreSQL
-      VpcId: !Ref AppVpc
-      SecurityGroupIngress:
-        - IpProtocol: tcp
-          FromPort: 5432
-          ToPort: 5432
-          SourceSecurityGroupId: !Ref LambdaSecurityGroup
-      SecurityGroupEgress:
-        - IpProtocol: -1
-          CidrIp: 0.0.0.0/0
-      Tags:
-        - Key: Name
-          Value: token-query-db-sg
-
-  # 告诉 Aurora 可以使用哪两个 private subnet
-  DatabaseSubnetGroup:
-    Type: AWS::RDS::DBSubnetGroup
-    Properties:
-      DBSubnetGroupDescription: Subnet group for Aurora PostgreSQL Serverless v2
-      SubnetIds:
-        - !Ref PrivateSubnetA
-        - !Ref PrivateSubnetB
-      Tags:
-        - Key: Name
-          Value: token-query-db-subnet-group
-
-  # 数据库本体
-  AuroraCluster:
-    Type: AWS::RDS::DBCluster
-    Properties:
-      Engine: aurora-postgresql
-      EngineVersion: '16.4'
-      DatabaseName: !Ref DBName
-      MasterUsername: !Ref DBUsername
-      MasterUserPassword: !Ref DBPassword
-      DBSubnetGroupName: !Ref DatabaseSubnetGroup
-      VpcSecurityGroupIds:
-        - !Ref DatabaseSecurityGroup
-      ServerlessV2ScalingConfiguration:
-        MinCapacity: 0.5
-        MaxCapacity: 2
-      BackupRetentionPeriod: 1
-      DeletionProtection: false
-      Tags:
-        - Key: Name
-          Value: token-query-aurora-cluster
-
-  # 数据库计算实例
-  AuroraServerlessInstance:
-    Type: AWS::RDS::DBInstance
-    Properties:
-      DBClusterIdentifier: !Ref AuroraCluster
-      DBInstanceClass: db.serverless
-      Engine: aurora-postgresql
-      Tags:
-        - Key: Name
-          Value: token-query-aurora-serverless-instance
+      LogGroupName: !Sub "/aws/lambda/${AWS::StackName}-api"
+      RetentionInDays: 14
 
 Outputs:
-  ApiUrl:
-    Description: API Gateway endpoint URL
-    Value: !Sub "https://${ServerlessHttpApi}.execute-api.${AWS::Region}.amazonaws.com/"
-  AuroraEndpoint:
-    Description: Aurora PostgreSQL cluster endpoint
-    Value: !GetAtt AuroraCluster.Endpoint.Address
+  ApiEndpoint:
+    Description: HTTP API endpoint for the Lambda API.
+    Value: !Sub "https://${TokenQueryHttpApi}.execute-api.${AWS::Region}.${AWS::URLSuffix}"
+
+  FunctionName:
+    Description: Lambda function managed by this SAM stack.
+    Value: !Ref TokenQueryFunction
+
+  FunctionArn:
+    Description: Lambda function ARN managed by this SAM stack.
+    Value: !GetAtt TokenQueryFunction.Arn

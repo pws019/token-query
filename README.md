@@ -78,15 +78,14 @@ NODE_ENV=production
 
 Local development reads the same variable names from `apps/server/.env`. In AWS, do not upload `.env`; configure the values in Lambda environment variables or through your deployment tool. If the database is in a private VPC, attach the Lambda function to the same VPC/subnets/security groups, or use an RDS Proxy endpoint in `DATABASE_URL`.
 
-### GitHub Actions Lambda Deployment
+### SAM Lambda API Deployment
 
-The Lambda API is deployed by `.github/workflows/deploy-lambda-api.yml`. The workflow builds `apps/server`, zips `apps/server/dist/*`, and updates the existing Lambda function code. It does not update Lambda environment variables, VPC settings, handler, runtime, or API Gateway routes.
+The Lambda API is deployed by `.github/workflows/deploy-lambda-api.yml` through AWS SAM. The first SAM migration phase manages the API Lambda and HTTP API Gateway, while reusing the existing VPC subnets, Lambda security group, and Aurora database.
 
-Current deployed Lambda shape:
+Current target runtime shape:
 
 ```text
 AWS_REGION=us-west-2
-LAMBDA_FUNCTION_NAME=token-query-function
 Runtime=nodejs22.x
 Handler=lambda.handler
 Architecture=arm64
@@ -96,35 +95,36 @@ Configure these GitHub repository variables:
 
 ```text
 AWS_REGION=us-west-2
-LAMBDA_FUNCTION_NAME=token-query-function
+SAM_STACK_NAME=token-query-api
+CORS_ORIGIN=https://app.doyouadoreme.online
+PRIVATE_SUBNET_IDS=subnet-0733f030693829d94,subnet-0a5b4b26959047941
+LAMBDA_SECURITY_GROUP_ID=sg-09a462643a2e9b6c0
 ```
 
-Configure this GitHub repository secret:
+Configure these GitHub repository secrets:
 
 ```text
 AWS_DEPLOY_ROLE_ARN=arn:aws:iam::<account-id>:role/<github-actions-lambda-deploy-role>
+DATABASE_URL=postgresql://...
+INTERNAL_PROXY_TOKEN=shared-secret-with-cloudflare-worker
+ADMIN_MIGRATION_TOKEN=temporary-admin-token   # optional; clear after database initialization
 ```
 
-The recommended AWS credential flow is GitHub OIDC. The IAM role used by `AWS_DEPLOY_ROLE_ARN` needs permission to update and read the existing Lambda function:
+The recommended AWS credential flow is GitHub OIDC. Because SAM deploys through CloudFormation and creates Lambda/API Gateway resources, the IAM role used by `AWS_DEPLOY_ROLE_ARN` needs CloudFormation, S3 artifact, Lambda, API Gateway, IAM role, logs, and VPC attachment permissions. Scope resources to the `token-query-api` stack and deployment bucket where possible.
 
-```json
-{
-  "Version": "2012-10-17",
-  "Statement": [
-    {
-      "Effect": "Allow",
-      "Action": [
-        "lambda:UpdateFunctionCode",
-        "lambda:GetFunction",
-        "lambda:GetFunctionConfiguration"
-      ],
-      "Resource": "arn:aws:lambda:us-west-2:<account-id>:function:token-query-function"
-    }
-  ]
-}
+For local deployment, build the server before SAM packages the Lambda artifact:
+
+```bash
+pnpm --filter server build
+sam build
+sam deploy
 ```
 
-Keep production runtime settings in Lambda itself:
+`samconfig.toml` stores non-secret deployment defaults. Pass secret parameters through GitHub Actions secrets, `sam deploy --parameter-overrides`, or a future Secrets Manager/SSM integration.
+
+The SAM stack outputs the new API endpoint as `ApiEndpoint`. After verifying `/api/health`, update the Cloudflare Worker `LAMBDA_API_ORIGIN` value to this endpoint when you are ready to cut traffic over from the manually created API Gateway.
+
+Keep production runtime settings out of source control:
 
 ```text
 DATABASE_URL

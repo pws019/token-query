@@ -11,6 +11,8 @@ on:
       - "pnpm-lock.yaml"
       - "pnpm-workspace.yaml"
       - "turbo.json"
+      - "template.yaml"
+      - "samconfig.toml"
       - ".github/workflows/deploy-lambda-api.yml"
   workflow_dispatch:
 
@@ -23,7 +25,10 @@ jobs:
     runs-on: ubuntu-latest
     env:
       AWS_REGION: ${{ vars.AWS_REGION || 'us-west-2' }}
-      LAMBDA_FUNCTION_NAME: ${{ vars.LAMBDA_FUNCTION_NAME || 'token-query-function' }}
+      SAM_STACK_NAME: ${{ vars.SAM_STACK_NAME || 'token-query-api' }}
+      CORS_ORIGIN: ${{ vars.CORS_ORIGIN || 'https://app.doyouadoreme.online' }}
+      PRIVATE_SUBNET_IDS: ${{ vars.PRIVATE_SUBNET_IDS || 'subnet-0733f030693829d94,subnet-0a5b4b26959047941' }}
+      LAMBDA_SECURITY_GROUP_ID: ${{ vars.LAMBDA_SECURITY_GROUP_ID || 'sg-09a462643a2e9b6c0' }}
 
     steps:
       - name: Checkout
@@ -40,16 +45,26 @@ jobs:
           node-version: 22
           cache: pnpm
 
+      - name: Setup AWS SAM
+        uses: aws-actions/setup-sam@v2
+
       - name: Install dependencies
         run: pnpm install --frozen-lockfile
 
-      - name: Check Lambda deployment settings
+      - name: Check SAM deployment settings
         env:
           AWS_DEPLOY_ROLE_ARN: ${{ secrets.AWS_DEPLOY_ROLE_ARN }}
+          DATABASE_URL: ${{ secrets.DATABASE_URL }}
+          INTERNAL_PROXY_TOKEN: ${{ secrets.INTERNAL_PROXY_TOKEN }}
         run: |
           test -n "$AWS_REGION"
-          test -n "$LAMBDA_FUNCTION_NAME"
+          test -n "$SAM_STACK_NAME"
           test -n "$AWS_DEPLOY_ROLE_ARN"
+          test -n "$DATABASE_URL"
+          test -n "$INTERNAL_PROXY_TOKEN"
+          test -n "$CORS_ORIGIN"
+          test -n "$PRIVATE_SUBNET_IDS"
+          test -n "$LAMBDA_SECURITY_GROUP_ID"
 
       - name: Check server types
         run: pnpm --filter server check-types
@@ -57,31 +72,44 @@ jobs:
       - name: Build server
         run: pnpm --filter server build
 
-      - name: Package Lambda artifact
-        working-directory: apps/server/dist
-        run: zip -r ../../../lambda-api.zip . -i "*.mjs"
-
       - name: Configure AWS credentials
         uses: aws-actions/configure-aws-credentials@v4
         with:
           role-to-assume: ${{ secrets.AWS_DEPLOY_ROLE_ARN }}
           aws-region: ${{ env.AWS_REGION }}
 
-      - name: Deploy Lambda code
-        run: |
-          aws lambda update-function-code \
-            --function-name "$LAMBDA_FUNCTION_NAME" \
-            --zip-file fileb://lambda-api.zip \
-            --region "$AWS_REGION"
+      - name: Validate SAM template
+        run: sam validate --region "$AWS_REGION"
 
-          aws lambda wait function-updated \
-            --function-name "$LAMBDA_FUNCTION_NAME" \
-            --region "$AWS_REGION"
+      - name: Build SAM application
+        run: sam build --template-file template.yaml --cached --parallel
 
-      - name: Verify Lambda configuration
+      - name: Deploy SAM stack
+        env:
+          DATABASE_URL: ${{ secrets.DATABASE_URL }}
+          INTERNAL_PROXY_TOKEN: ${{ secrets.INTERNAL_PROXY_TOKEN }}
+          ADMIN_MIGRATION_TOKEN: ${{ secrets.ADMIN_MIGRATION_TOKEN }}
         run: |
-          aws lambda get-function-configuration \
-            --function-name "$LAMBDA_FUNCTION_NAME" \
+          sam deploy \
+            --stack-name "$SAM_STACK_NAME" \
             --region "$AWS_REGION" \
-            --query '{FunctionName:FunctionName,Runtime:Runtime,Handler:Handler,LastModified:LastModified,LastUpdateStatus:LastUpdateStatus,Architectures:Architectures}' \
+            --resolve-s3 \
+            --s3-prefix "$SAM_STACK_NAME" \
+            --capabilities CAPABILITY_IAM \
+            --no-confirm-changeset \
+            --no-fail-on-empty-changeset \
+            --parameter-overrides \
+              CorsOrigin="$CORS_ORIGIN" \
+              DatabaseUrl="$DATABASE_URL" \
+              InternalProxyToken="$INTERNAL_PROXY_TOKEN" \
+              AdminMigrationToken="$ADMIN_MIGRATION_TOKEN" \
+              PrivateSubnetIds="$PRIVATE_SUBNET_IDS" \
+              LambdaSecurityGroupId="$LAMBDA_SECURITY_GROUP_ID"
+
+      - name: Show SAM outputs
+        run: |
+          aws cloudformation describe-stacks \
+            --stack-name "$SAM_STACK_NAME" \
+            --region "$AWS_REGION" \
+            --query 'Stacks[0].Outputs' \
             --output table
