@@ -213,3 +213,5 @@ aws cloudformation execute-change-set \
 - **ACM 证书本身不支持 CloudFormation import**，只能用 ARN 引用，不放进任何 stack 管理。
 - **部署角色的 IAM policy 是照"接管已有资源（import）"这个场景配的，不等于"从零创建/删除"需要的权限**：只给了具体函数名 `token-query-function` 的 `UpdateFunctionCode`/`AddPermission`/`TagResource` 等，没给 `CreateFunction`/`DeleteFunction`。如果 stack 是从零 `create-stack`（不是 import 出来的），第一次部署会在这一步报 AccessDenied 卡住，stack 进入 `ROLLBACK_COMPLETE`。修法：给部署角色补上对应资源名的 `lambda:CreateFunction`/`lambda:DeleteFunction`，然后 `delete-stack` 清掉这个空壳 stack（`ROLLBACK_COMPLETE` 状态下没有任何真实资源残留，可以直接删）重新创建。
 - **`ROLLBACK_COMPLETE` 状态的 stack 不能直接 `update`/`create-change-set`**，必须先 `delete-stack` 再重新 `create-stack`。
+- **`apigateway:TagResource`/`UntagResource` 是独立的 IAM action**，不归 `apigateway:GET`/`POST`/`PUT`/`PATCH`/`DELETE` 这几个"动词"权限管——SAM 给 HttpApi Stage 打 stack 标签时会调用它，缺了会在 `CREATE_FAILED` 里看到 `apigateway:TagResource ... AccessDenied`。
+- **`logs:DeleteLogGroup` 跟 `CreateLogGroup`/`PutRetentionPolicy`/`TagResource` 是分开粒度的权限**，容易补权限时漏掉这一个——直到某次 rollback 需要删日志组才会暴露出来（`ROLLBACK_FAILED`）。补权限时記得把某个资源的增删改查动作一次性配全，不要只补当时报错的那一个。

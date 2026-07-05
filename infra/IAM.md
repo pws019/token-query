@@ -90,6 +90,7 @@ aws iam create-role \
 | `token-query-sam-deploy-policy-patch4` | 补读取 `/token-query/network/*` SSM 参数的权限 |
 | `token-query-sam-deploy-policy-patch5` | 补读取 `/token-query/db/*` SSM 参数的权限 |
 | `token-query-sam-deploy-policy-patch6` | 补 `token-query-function` 这个具体函数名的 `CreateFunction`/`DeleteFunction`（从零创建/彻底删除 stack 时才会用到，import 场景不需要） |
+| `token-query-sam-deploy-policy-patch7` | 补 `apigateway:TagResource`/`UntagResource`（打标签是独立 action，不归 GET/POST/PUT/PATCH/DELETE 管）；补 `token-query-function` 日志组的 `logs:DeleteLogGroup`（之前只补了 Create/PutRetentionPolicy/TagResource，漏了 Delete） |
 
 完整策略内容和一次性创建命令：
 
@@ -198,7 +199,7 @@ cat > /tmp/iam-policies/sam-deploy-policy.json <<'EOF'
     {
       "Sid": "ManageSamHttpApi",
       "Effect": "Allow",
-      "Action": ["apigateway:DELETE", "apigateway:GET", "apigateway:PATCH", "apigateway:POST", "apigateway:PUT"],
+      "Action": ["apigateway:DELETE", "apigateway:GET", "apigateway:PATCH", "apigateway:POST", "apigateway:PUT", "apigateway:TagResource", "apigateway:UntagResource"],
       "Resource": "arn:aws:apigateway:us-west-2::/*"
     },
     {
