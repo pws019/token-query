@@ -8,6 +8,7 @@ import { logger } from "hono/logger";
 
 import { adminRoutes } from "./routes/admin";
 import { githubRoutes } from "./routes/github";
+import { healthRoutes } from "./routes/health";
 
 const app = new Hono();
 
@@ -23,6 +24,7 @@ app.use(
 
 app.route("/api/admin", adminRoutes);
 app.route("/api/github", githubRoutes);
+app.route("/api/health", healthRoutes);
 
 app.use(
   "/trpc/*",

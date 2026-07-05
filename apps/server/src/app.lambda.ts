@@ -4,6 +4,7 @@ import { cors } from "hono/cors";
 
 import { adminRoutes } from "./routes/admin";
 import { githubRoutes } from "./routes/github";
+import { healthRoutes } from "./routes/health";
 
 const app = new Hono();
 
@@ -31,6 +32,7 @@ app.use("/api/*", async (c, next) => {
 
 app.route("/api/admin", adminRoutes);
 app.route("/api/github", githubRoutes);
+app.route("/api/health", healthRoutes);
 
 app.get("/", (c) => {
   return c.text("OK");
