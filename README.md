@@ -110,7 +110,108 @@ INTERNAL_PROXY_TOKEN=shared-secret-with-cloudflare-worker
 ADMIN_MIGRATION_TOKEN=temporary-admin-token   # optional; clear after database initialization
 ```
 
-The recommended AWS credential flow is GitHub OIDC. Because SAM deploys through CloudFormation and creates Lambda/API Gateway resources, the IAM role used by `AWS_DEPLOY_ROLE_ARN` needs CloudFormation, S3 artifact, Lambda, API Gateway, IAM role, logs, and VPC attachment permissions. Scope resources to the `token-query-api` stack and deployment bucket where possible.
+The recommended AWS credential flow is GitHub OIDC. Because SAM deploys through CloudFormation and creates Lambda/API Gateway resources, the IAM role used by `AWS_DEPLOY_ROLE_ARN` needs CloudFormation, S3 artifact, Lambda, API Gateway, IAM role, logs, and VPC attachment permissions.
+
+`sam deploy --resolve-s3` also creates or updates the SAM managed artifact stack named `aws-sam-cli-managed-default` the first time it runs. Include both the application stack and the SAM managed stack in the deployment role policy:
+
+```json
+{
+  "Version": "2012-10-17",
+  "Statement": [
+    {
+      "Effect": "Allow",
+      "Action": [
+        "cloudformation:CreateChangeSet",
+        "cloudformation:CreateStack",
+        "cloudformation:DeleteChangeSet",
+        "cloudformation:DescribeChangeSet",
+        "cloudformation:DescribeStackEvents",
+        "cloudformation:DescribeStacks",
+        "cloudformation:ExecuteChangeSet",
+        "cloudformation:GetTemplate",
+        "cloudformation:UpdateStack"
+      ],
+      "Resource": [
+        "arn:aws:cloudformation:us-west-2:<account-id>:stack/token-query-api/*",
+        "arn:aws:cloudformation:us-west-2:<account-id>:stack/aws-sam-cli-managed-default/*"
+      ]
+    },
+    {
+      "Effect": "Allow",
+      "Action": [
+        "s3:CreateBucket",
+        "s3:GetBucketLocation",
+        "s3:GetObject",
+        "s3:ListBucket",
+        "s3:PutObject"
+      ],
+      "Resource": [
+        "arn:aws:s3:::aws-sam-cli-managed-default-*",
+        "arn:aws:s3:::aws-sam-cli-managed-default-*/*"
+      ]
+    },
+    {
+      "Effect": "Allow",
+      "Action": [
+        "lambda:AddPermission",
+        "lambda:CreateFunction",
+        "lambda:DeleteFunction",
+        "lambda:GetFunction",
+        "lambda:GetFunctionConfiguration",
+        "lambda:RemovePermission",
+        "lambda:TagResource",
+        "lambda:UpdateFunctionCode",
+        "lambda:UpdateFunctionConfiguration"
+      ],
+      "Resource": "arn:aws:lambda:us-west-2:<account-id>:function:token-query-api-*"
+    },
+    {
+      "Effect": "Allow",
+      "Action": [
+        "apigateway:DELETE",
+        "apigateway:GET",
+        "apigateway:PATCH",
+        "apigateway:POST",
+        "apigateway:PUT"
+      ],
+      "Resource": "arn:aws:apigateway:us-west-2::/*"
+    },
+    {
+      "Effect": "Allow",
+      "Action": [
+        "iam:AttachRolePolicy",
+        "iam:CreateRole",
+        "iam:DeleteRole",
+        "iam:DetachRolePolicy",
+        "iam:GetRole",
+        "iam:PassRole",
+        "iam:TagRole"
+      ],
+      "Resource": "arn:aws:iam::<account-id>:role/token-query-api-*"
+    },
+    {
+      "Effect": "Allow",
+      "Action": [
+        "logs:CreateLogGroup",
+        "logs:DeleteLogGroup",
+        "logs:DescribeLogGroups",
+        "logs:PutRetentionPolicy",
+        "logs:TagResource"
+      ],
+      "Resource": "arn:aws:logs:us-west-2:<account-id>:log-group:/aws/lambda/token-query-api-*"
+    },
+    {
+      "Effect": "Allow",
+      "Action": [
+        "ec2:DescribeSecurityGroups",
+        "ec2:DescribeSubnets",
+        "ec2:DescribeVpcs"
+      ],
+      "Resource": "*"
+    }
+  ]
+}
+```
 
 For local deployment, build the server before SAM packages the Lambda artifact:
 
