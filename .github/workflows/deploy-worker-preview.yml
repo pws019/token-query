@@ -35,7 +35,8 @@ jobs:
     runs-on: ubuntu-latest
     env:
       PREVIEW_BASE_DOMAIN: ${{ vars.PREVIEW_BASE_DOMAIN || 'app.doyouadoreme.online' }}
-      LAMBDA_API_ORIGIN: ${{ vars.PREVIEW_LAMBDA_API_ORIGIN || vars.LAMBDA_API_ORIGIN }}
+      PREVIEW_LAMBDA_API_ORIGIN_VALUE: ${{ vars.PREVIEW_LAMBDA_API_ORIGIN }}
+      LAMBDA_API_ORIGIN_VALUE: ${{ vars.LAMBDA_API_ORIGIN }}
 
     steps:
       - name: Validate PR preview naming
@@ -116,8 +117,38 @@ jobs:
         run: |
           set -euo pipefail
 
+          if [[ -n "${PREVIEW_LAMBDA_API_ORIGIN_VALUE:-}" ]]; then
+            lambda_api_origin_source="PREVIEW_LAMBDA_API_ORIGIN"
+            lambda_api_origin="$PREVIEW_LAMBDA_API_ORIGIN_VALUE"
+          else
+            lambda_api_origin_source="LAMBDA_API_ORIGIN"
+            lambda_api_origin="$LAMBDA_API_ORIGIN_VALUE"
+          fi
+
+          {
+            echo "LAMBDA_API_ORIGIN_SOURCE=$lambda_api_origin_source"
+            echo "LAMBDA_API_ORIGIN=$lambda_api_origin"
+          } >> "$GITHUB_ENV"
+
+          LAMBDA_API_ORIGIN_SOURCE="$lambda_api_origin_source" LAMBDA_API_ORIGIN="$lambda_api_origin" python3 - <<'PY'
+          import os
+
+          value = os.environ["LAMBDA_API_ORIGIN"]
+          source = os.environ["LAMBDA_API_ORIGIN_SOURCE"]
+          print(f"Using {source} for LAMBDA_API_ORIGIN")
+          print(f"LAMBDA_API_ORIGIN length: {len(value)}")
+          print(f"LAMBDA_API_ORIGIN repr: {value!r}")
+          print(f"LAMBDA_API_ORIGIN is_ascii: {value.isascii()}")
+          print("LAMBDA_API_ORIGIN codepoints:", " ".join(f"U+{ord(ch):04X}" for ch in value))
+          print(f"Contains markdown delimiters: {any(ch in value for ch in '[]()')}")
+          print(f"Contains whitespace: {any(ch.isspace() for ch in value)}")
+          print(f"Starts with https://: {value.startswith('https://')}")
+          PY
+
+          LAMBDA_API_ORIGIN="$lambda_api_origin"
+
           if [[ ! "$LAMBDA_API_ORIGIN" =~ ^https://[^[:space:]\]\)]+$ ]]; then
-            echo "::error::LAMBDA_API_ORIGIN must be a plain https URL, for example https://m9pf25lagi.execute-api.us-west-2.amazonaws.com"
+            echo "::error::LAMBDA_API_ORIGIN from $lambda_api_origin_source must be a plain https URL, for example https://m9pf25lagi.execute-api.us-west-2.amazonaws.com"
             exit 1
           fi
 
