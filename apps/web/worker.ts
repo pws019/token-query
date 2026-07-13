@@ -10,6 +10,7 @@ type Env = {
   };
   LAMBDA_API_ORIGIN: string;
   INTERNAL_PROXY_TOKEN?: string;
+  PREVIEW_ID?: string;
 };
 
 type ExecutionContext = {
@@ -57,6 +58,9 @@ async function proxyToLambda(request: Request, env: Env) {
   headers.delete("host");
   if (env.INTERNAL_PROXY_TOKEN) {
     headers.set("X-Internal-Proxy-Token", env.INTERNAL_PROXY_TOKEN);
+  }
+  if (env.PREVIEW_ID) {
+    headers.set("X-Preview-Id", env.PREVIEW_ID);
   }
 
   let response: Response;
