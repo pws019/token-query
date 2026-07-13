@@ -1,0 +1,262 @@
+name: Deploy Cloudflare Worker Preview
+
+on:
+  pull_request:
+    types:
+      - opened
+      - reopened
+      - synchronize
+      - edited
+    branches:
+      - main-v2
+    paths:
+      - "apps/web/**"
+      - "packages/api/**"
+      - "packages/env/**"
+      - "packages/ui/**"
+      - "package.json"
+      - "pnpm-lock.yaml"
+      - "pnpm-workspace.yaml"
+      - "turbo.json"
+      - ".github/workflows/deploy-worker-preview.yml"
+      - "docs/pr-preview-naming.md"
+
+permissions:
+  contents: read
+  issues: write
+  pull-requests: write
+
+concurrency:
+  group: worker-preview-${{ github.event.pull_request.number }}
+  cancel-in-progress: true
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    env:
+      PREVIEW_BASE_DOMAIN: ${{ vars.PREVIEW_BASE_DOMAIN || 'app.doyouadoreme.online' }}
+      PREVIEW_LAMBDA_API_ORIGIN_VALUE: ${{ vars.PREVIEW_LAMBDA_API_ORIGIN }}
+      LAMBDA_API_ORIGIN_VALUE: ${{ vars.LAMBDA_API_ORIGIN }}
+
+    steps:
+      - name: Validate PR preview naming
+        id: preview
+        env:
+          BRANCH_NAME: ${{ github.head_ref }}
+          PR_TITLE: ${{ github.event.pull_request.title }}
+          COMMIT_SHA: ${{ github.event.pull_request.head.sha }}
+        run: |
+          set -euo pipefail
+
+          branch_regex='^(bug|feat|fix|chore|hotfix)/((bug|feat|fix|chore|hotfix)-[0-9]+)-[a-z0-9-]+$'
+          title_regex='^((bug|feat|fix|chore|hotfix)-[0-9]+):'
+
+          if [[ ! "$BRANCH_NAME" =~ $branch_regex ]]; then
+            echo "::error::Branch name must match <type>/<preview-id>-<short-description>, for example bug/bug-111-login-token-expiry."
+            exit 1
+          fi
+
+          branch_preview_id="${BASH_REMATCH[2]}"
+
+          if [[ ! "$PR_TITLE" =~ $title_regex ]]; then
+            echo "::error::PR title must start with <preview-id>:, for example bug-111: 修复登录 token 过期问题."
+            exit 1
+          fi
+
+          title_preview_id="${BASH_REMATCH[1]}"
+
+          if [[ "$branch_preview_id" != "$title_preview_id" ]]; then
+            echo "::error::Preview ID mismatch. Branch uses '$branch_preview_id' but PR title uses '$title_preview_id'."
+            exit 1
+          fi
+
+          if (( ${#branch_preview_id} > 40 )); then
+            echo "::error::Preview ID is too long. Keep it at 40 characters or fewer."
+            exit 1
+          fi
+
+          worker_name="token-query-pr-$branch_preview_id"
+          preview_domain="$branch_preview_id.$PREVIEW_BASE_DOMAIN"
+          short_sha="${COMMIT_SHA:0:7}"
+
+          {
+            echo "preview_id=$branch_preview_id"
+            echo "worker_name=$worker_name"
+            echo "preview_domain=$preview_domain"
+            echo "short_sha=$short_sha"
+          } >> "$GITHUB_OUTPUT"
+
+          {
+            echo "PREVIEW_ID=$branch_preview_id"
+            echo "WORKER_NAME=$worker_name"
+            echo "PREVIEW_DOMAIN=$preview_domain"
+            echo "SHORT_SHA=$short_sha"
+          } >> "$GITHUB_ENV"
+
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup pnpm
+        uses: pnpm/action-setup@v4
+        with:
+          version: 11.8.0
+
+      - name: Setup Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: pnpm
+
+      - name: Install dependencies
+        run: pnpm install --frozen-lockfile
+
+      - name: Build web
+        run: pnpm --filter web build
+
+      - name: Generate Wrangler preview config
+        run: |
+          set -euo pipefail
+
+          if [[ -n "${PREVIEW_LAMBDA_API_ORIGIN_VALUE:-}" ]]; then
+            lambda_api_origin_source="PREVIEW_LAMBDA_API_ORIGIN"
+            lambda_api_origin="$PREVIEW_LAMBDA_API_ORIGIN_VALUE"
+          else
+            lambda_api_origin_source="LAMBDA_API_ORIGIN"
+            lambda_api_origin="$LAMBDA_API_ORIGIN_VALUE"
+          fi
+
+          {
+            echo "LAMBDA_API_ORIGIN_SOURCE=$lambda_api_origin_source"
+            echo "LAMBDA_API_ORIGIN=$lambda_api_origin"
+          } >> "$GITHUB_ENV"
+
+          LAMBDA_API_ORIGIN_SOURCE="$lambda_api_origin_source" LAMBDA_API_ORIGIN="$lambda_api_origin" python3 - <<'PY'
+          import os
+
+          value = os.environ["LAMBDA_API_ORIGIN"]
+          source = os.environ["LAMBDA_API_ORIGIN_SOURCE"]
+          print(f"Using {source} for LAMBDA_API_ORIGIN")
+          print(f"LAMBDA_API_ORIGIN length: {len(value)}")
+          print(f"LAMBDA_API_ORIGIN repr: {value!r}")
+          print(f"LAMBDA_API_ORIGIN is_ascii: {value.isascii()}")
+          print("LAMBDA_API_ORIGIN codepoints:", " ".join(f"U+{ord(ch):04X}" for ch in value))
+          print(f"Contains markdown delimiters: {any(ch in value for ch in '[]()')}")
+          print(f"Contains whitespace: {any(ch.isspace() for ch in value)}")
+          print(f"Starts with https://: {value.startswith('https://')}")
+          if not value.isascii():
+              raise SystemExit(f"::error::LAMBDA_API_ORIGIN from {source} must contain ASCII characters only.")
+          if any(ch.isspace() for ch in value):
+              raise SystemExit(f"::error::LAMBDA_API_ORIGIN from {source} must not contain whitespace.")
+          if any(ch in value for ch in "[]()"):
+              raise SystemExit(f"::error::LAMBDA_API_ORIGIN from {source} must be a plain URL, not a Markdown link.")
+          from urllib.parse import urlparse
+          parsed = urlparse(value)
+          if parsed.scheme != "https" or not parsed.netloc or parsed.path not in ("", "/") or parsed.params or parsed.query or parsed.fragment:
+              raise SystemExit(f"::error::LAMBDA_API_ORIGIN from {source} must be a plain https origin, for example https://m9pf25lagi.execute-api.us-west-2.amazonaws.com")
+          PY
+
+          LAMBDA_API_ORIGIN="$lambda_api_origin"
+
+          jq -n \
+            --arg schema "../../node_modules/wrangler/config-schema.json" \
+            --arg name "$WORKER_NAME" \
+            --arg previewId "$PREVIEW_ID" \
+            --arg commitSha "$SHORT_SHA" \
+            --arg lambdaApiOrigin "$LAMBDA_API_ORIGIN" \
+            '{
+              "$schema": $schema,
+              name: $name,
+              main: "./worker.ts",
+              compatibility_date: "2026-07-01",
+              observability: {
+                enabled: true
+              },
+              vars: {
+                APP_ENV: "preview",
+                PREVIEW_ID: $previewId,
+                PREVIEW_COMMIT_SHA: $commitSha,
+                LAMBDA_API_ORIGIN: $lambdaApiOrigin
+              },
+              assets: {
+                directory: "./build/client",
+                binding: "ASSETS"
+              }
+            }' > apps/web/wrangler.generated.preview.jsonc
+
+      - name: Check Cloudflare preview deployment settings
+        env:
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+          INTERNAL_PROXY_TOKEN: ${{ secrets.INTERNAL_PROXY_TOKEN }}
+        run: |
+          set -euo pipefail
+
+          test -n "$CLOUDFLARE_API_TOKEN"
+          test -n "$CLOUDFLARE_ACCOUNT_ID"
+          test -n "$INTERNAL_PROXY_TOKEN"
+          test -n "$PREVIEW_BASE_DOMAIN"
+          test -n "$LAMBDA_API_ORIGIN"
+          test -n "$PREVIEW_ID"
+          test -n "$WORKER_NAME"
+          test -n "$PREVIEW_DOMAIN"
+
+      - name: Deploy Cloudflare Worker preview
+        env:
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+        run: >
+          pnpm dlx wrangler@4 deploy
+          --config=apps/web/wrangler.generated.preview.jsonc
+          --domain="$PREVIEW_DOMAIN"
+          --keep-vars
+
+      - name: Set Cloudflare Worker preview secrets
+        env:
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+          INTERNAL_PROXY_TOKEN: ${{ secrets.INTERNAL_PROXY_TOKEN }}
+        run: |
+          set -euo pipefail
+
+          printf "%s" "$INTERNAL_PROXY_TOKEN" | pnpm dlx wrangler@4 secret put INTERNAL_PROXY_TOKEN --config=apps/web/wrangler.generated.preview.jsonc
+
+      - name: Comment preview URL
+        uses: actions/github-script@v7
+        with:
+          script: |
+            const marker = "<!-- token-query-worker-preview -->";
+            const previewUrl = `https://${process.env.PREVIEW_DOMAIN}`;
+            const body = `${marker}
+            Cloudflare Worker preview is ready:
+
+            ${previewUrl}
+
+            Worker: \`${process.env.WORKER_NAME}\`
+            Preview ID: \`${process.env.PREVIEW_ID}\`
+            Commit: \`${process.env.SHORT_SHA}\``;
+
+            const { owner, repo } = context.repo;
+            const issue_number = context.issue.number;
+            const comments = await github.paginate(github.rest.issues.listComments, {
+              owner,
+              repo,
+              issue_number,
+              per_page: 100,
+            });
+            const existing = comments.find((comment) => comment.body?.includes(marker));
+
+            if (existing) {
+              await github.rest.issues.updateComment({
+                owner,
+                repo,
+                comment_id: existing.id,
+                body,
+              });
+            } else {
+              await github.rest.issues.createComment({
+                owner,
+                repo,
+                issue_number,
+                body,
+              });
+            }

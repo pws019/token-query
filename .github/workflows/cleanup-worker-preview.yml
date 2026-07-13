@@ -1,0 +1,128 @@
+name: Cleanup Cloudflare Worker Preview
+
+on:
+  pull_request:
+    types:
+      - closed
+    branches:
+      - main-v2
+
+permissions:
+  contents: read
+  issues: write
+  pull-requests: read
+
+concurrency:
+  group: worker-preview-${{ github.event.pull_request.number }}
+  cancel-in-progress: false
+
+jobs:
+  cleanup:
+    runs-on: ubuntu-latest
+    env:
+      PREVIEW_BASE_DOMAIN: ${{ vars.PREVIEW_BASE_DOMAIN || 'app.doyouadoreme.online' }}
+
+    steps:
+      - name: Resolve PR preview names
+        env:
+          BRANCH_NAME: ${{ github.head_ref }}
+          PR_TITLE: ${{ github.event.pull_request.title }}
+        run: |
+          set -euo pipefail
+
+          branch_regex='^(bug|feat|fix|chore|hotfix)/((bug|feat|fix|chore|hotfix)-[0-9]+)-[a-z0-9-]+$'
+          title_regex='^((bug|feat|fix|chore|hotfix)-[0-9]+):'
+
+          if [[ "$BRANCH_NAME" =~ $branch_regex ]]; then
+            preview_id="${BASH_REMATCH[2]}"
+          elif [[ "$PR_TITLE" =~ $title_regex ]]; then
+            preview_id="${BASH_REMATCH[1]}"
+          else
+            echo "::error::Unable to resolve preview ID from branch '$BRANCH_NAME' or PR title '$PR_TITLE'."
+            exit 1
+          fi
+
+          worker_name="token-query-pr-$preview_id"
+          preview_domain="$preview_id.$PREVIEW_BASE_DOMAIN"
+
+          {
+            echo "PREVIEW_ID=$preview_id"
+            echo "WORKER_NAME=$worker_name"
+            echo "PREVIEW_DOMAIN=$preview_domain"
+          } >> "$GITHUB_ENV"
+
+      - name: Check Cloudflare cleanup settings
+        env:
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+        run: |
+          set -euo pipefail
+
+          test -n "$CLOUDFLARE_API_TOKEN"
+          test -n "$CLOUDFLARE_ACCOUNT_ID"
+          test -n "$PREVIEW_ID"
+          test -n "$WORKER_NAME"
+          test -n "$PREVIEW_DOMAIN"
+
+      - name: Setup pnpm
+        uses: pnpm/action-setup@v4
+        with:
+          version: 11.8.0
+
+      - name: Setup Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22
+
+      - name: Delete Cloudflare Worker preview
+        env:
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+        run: |
+          set -euo pipefail
+
+          printf "yes\n" | pnpm dlx wrangler@4 delete --name "$WORKER_NAME"
+
+      - name: Comment cleanup result
+        if: always()
+        uses: actions/github-script@v7
+        env:
+          CLEANUP_STATUS: ${{ job.status }}
+        with:
+          script: |
+            const marker = "<!-- token-query-worker-preview-cleanup -->";
+            const merged = context.payload.pull_request?.merged === true;
+            const status = process.env.CLEANUP_STATUS;
+            const body = `${marker}
+            Cloudflare Worker preview cleanup ${status}.
+
+            Preview URL: https://${process.env.PREVIEW_DOMAIN}
+            Worker: \`${process.env.WORKER_NAME}\`
+            Preview ID: \`${process.env.PREVIEW_ID}\`
+            PR result: ${merged ? "merged" : "closed"}`;
+
+            const { owner, repo } = context.repo;
+            const issue_number = context.issue.number;
+            const comments = await github.paginate(github.rest.issues.listComments, {
+              owner,
+              repo,
+              issue_number,
+              per_page: 100,
+            });
+            const existing = comments.find((comment) => comment.body?.includes(marker));
+
+            if (existing) {
+              await github.rest.issues.updateComment({
+                owner,
+                repo,
+                comment_id: existing.id,
+                body,
+              });
+            } else {
+              await github.rest.issues.createComment({
+                owner,
+                repo,
+                issue_number,
+                body,
+              });
+            }

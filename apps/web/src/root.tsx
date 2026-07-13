@@ -33,6 +33,12 @@ export function Layout({ children }: { children: React.ReactNode }) {
         <meta name="viewport" content="width=device-width, initial-scale=1" />
         <Meta />
         <Links />
+        <script
+          dangerouslySetInnerHTML={{
+            __html:
+              "(()=>{if(!('__name'in window)){Object.defineProperty(window,'__name',{configurable:true,value:(fn,name)=>{try{Object.defineProperty(fn,'name',{configurable:true,value:name});}catch{}return fn;}});}})();",
+          }}
+        />
       </head>
       <body>
         {children}
