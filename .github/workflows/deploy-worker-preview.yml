@@ -143,14 +143,19 @@ jobs:
           print(f"Contains markdown delimiters: {any(ch in value for ch in '[]()')}")
           print(f"Contains whitespace: {any(ch.isspace() for ch in value)}")
           print(f"Starts with https://: {value.startswith('https://')}")
+          if not value.isascii():
+              raise SystemExit(f"::error::LAMBDA_API_ORIGIN from {source} must contain ASCII characters only.")
+          if any(ch.isspace() for ch in value):
+              raise SystemExit(f"::error::LAMBDA_API_ORIGIN from {source} must not contain whitespace.")
+          if any(ch in value for ch in "[]()"):
+              raise SystemExit(f"::error::LAMBDA_API_ORIGIN from {source} must be a plain URL, not a Markdown link.")
+          from urllib.parse import urlparse
+          parsed = urlparse(value)
+          if parsed.scheme != "https" or not parsed.netloc or parsed.path not in ("", "/") or parsed.params or parsed.query or parsed.fragment:
+              raise SystemExit(f"::error::LAMBDA_API_ORIGIN from {source} must be a plain https origin, for example https://m9pf25lagi.execute-api.us-west-2.amazonaws.com")
           PY
 
           LAMBDA_API_ORIGIN="$lambda_api_origin"
-
-          if [[ ! "$LAMBDA_API_ORIGIN" =~ ^https://[^[:space:]\]\)]+$ ]]; then
-            echo "::error::LAMBDA_API_ORIGIN from $lambda_api_origin_source must be a plain https URL, for example https://m9pf25lagi.execute-api.us-west-2.amazonaws.com"
-            exit 1
-          fi
 
           jq -n \
             --arg schema "../../node_modules/wrangler/config-schema.json" \
