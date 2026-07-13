@@ -19,6 +19,7 @@ on:
       - "pnpm-workspace.yaml"
       - "turbo.json"
       - ".github/workflows/deploy-worker-preview.yml"
+      - ".github/workflows/cleanup-worker-preview.yml"
       - "docs/pr-preview-naming.md"
 
 permissions:
