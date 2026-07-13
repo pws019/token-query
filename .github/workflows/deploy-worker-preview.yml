@@ -116,27 +116,36 @@ jobs:
         run: |
           set -euo pipefail
 
-          cat > apps/web/wrangler.generated.preview.jsonc <<EOF
-          {
-            "\$schema": "../../node_modules/wrangler/config-schema.json",
-            "name": "$WORKER_NAME",
-            "main": "./worker.ts",
-            "compatibility_date": "2026-07-01",
-            "observability": {
-              "enabled": true
-            },
-            "vars": {
-              "APP_ENV": "preview",
-              "PREVIEW_ID": "$PREVIEW_ID",
-              "PREVIEW_COMMIT_SHA": "$SHORT_SHA",
-              "LAMBDA_API_ORIGIN": "$LAMBDA_API_ORIGIN"
-            },
-            "assets": {
-              "directory": "./build/client",
-              "binding": "ASSETS"
-            }
-          }
-          EOF
+          if [[ ! "$LAMBDA_API_ORIGIN" =~ ^https://[^[:space:]\]\)]+$ ]]; then
+            echo "::error::LAMBDA_API_ORIGIN must be a plain https URL, for example https://m9pf25lagi.execute-api.us-west-2.amazonaws.com"
+            exit 1
+          fi
+
+          jq -n \
+            --arg schema "../../node_modules/wrangler/config-schema.json" \
+            --arg name "$WORKER_NAME" \
+            --arg previewId "$PREVIEW_ID" \
+            --arg commitSha "$SHORT_SHA" \
+            --arg lambdaApiOrigin "$LAMBDA_API_ORIGIN" \
+            '{
+              "$schema": $schema,
+              name: $name,
+              main: "./worker.ts",
+              compatibility_date: "2026-07-01",
+              observability: {
+                enabled: true
+              },
+              vars: {
+                APP_ENV: "preview",
+                PREVIEW_ID: $previewId,
+                PREVIEW_COMMIT_SHA: $commitSha,
+                LAMBDA_API_ORIGIN: $lambdaApiOrigin
+              },
+              assets: {
+                directory: "./build/client",
+                binding: "ASSETS"
+              }
+            }' > apps/web/wrangler.generated.preview.jsonc
 
       - name: Check Cloudflare preview deployment settings
         env:
