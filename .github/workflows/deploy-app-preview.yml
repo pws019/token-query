@@ -1,4 +1,4 @@
-name: Deploy Cloudflare Worker Preview
+name: Deploy App Preview
 
 on:
   pull_request:
@@ -10,16 +10,20 @@ on:
     branches:
       - main-v2
     paths:
+      - "apps/server/**"
       - "apps/web/**"
       - "packages/api/**"
+      - "packages/db/**"
       - "packages/env/**"
       - "packages/ui/**"
       - "package.json"
       - "pnpm-lock.yaml"
       - "pnpm-workspace.yaml"
       - "turbo.json"
-      - ".github/workflows/deploy-worker-preview.yml"
-      - ".github/workflows/cleanup-worker-preview.yml"
+      - "infra/cdk/**"
+      - ".github/workflows/deploy-api-preview.yml"
+      - ".github/workflows/deploy-app-preview.yml"
+      - ".github/workflows/cleanup-preview.yml"
       - "docs/pr-preview-naming.md"
 
 permissions:
@@ -28,7 +32,7 @@ permissions:
   pull-requests: write
 
 concurrency:
-  group: worker-preview-${{ github.event.pull_request.number }}
+  group: app-preview-${{ github.event.pull_request.number }}
   cancel-in-progress: true
 
 jobs:
@@ -36,7 +40,6 @@ jobs:
     runs-on: ubuntu-latest
     env:
       PREVIEW_BASE_DOMAIN: ${{ vars.PREVIEW_BASE_DOMAIN || 'app.doyouadoreme.online' }}
-      PREVIEW_LAMBDA_API_ORIGIN_VALUE: ${{ vars.PREVIEW_LAMBDA_API_ORIGIN }}
       LAMBDA_API_ORIGIN_VALUE: ${{ vars.LAMBDA_API_ORIGIN }}
 
     steps:
@@ -118,13 +121,8 @@ jobs:
         run: |
           set -euo pipefail
 
-          if [[ -n "${PREVIEW_LAMBDA_API_ORIGIN_VALUE:-}" ]]; then
-            lambda_api_origin_source="PREVIEW_LAMBDA_API_ORIGIN"
-            lambda_api_origin="$PREVIEW_LAMBDA_API_ORIGIN_VALUE"
-          else
-            lambda_api_origin_source="LAMBDA_API_ORIGIN"
-            lambda_api_origin="$LAMBDA_API_ORIGIN_VALUE"
-          fi
+          lambda_api_origin_source="LAMBDA_API_ORIGIN"
+          lambda_api_origin="$LAMBDA_API_ORIGIN_VALUE"
 
           {
             echo "LAMBDA_API_ORIGIN_SOURCE=$lambda_api_origin_source"
@@ -201,7 +199,7 @@ jobs:
           test -n "$WORKER_NAME"
           test -n "$PREVIEW_DOMAIN"
 
-      - name: Deploy Cloudflare Worker preview
+      - name: Deploy app preview Worker
         env:
           CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
           CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
@@ -211,7 +209,7 @@ jobs:
           --domain="$PREVIEW_DOMAIN"
           --keep-vars
 
-      - name: Set Cloudflare Worker preview secrets
+      - name: Set app preview Worker secrets
         env:
           CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
           CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
@@ -225,14 +223,14 @@ jobs:
         uses: actions/github-script@v7
         with:
           script: |
-            const marker = "<!-- token-query-worker-preview -->";
+            const marker = "<!-- token-query-app-preview -->";
             const previewUrl = `https://${process.env.PREVIEW_DOMAIN}`;
             const body = `${marker}
-            Cloudflare Worker preview is ready:
+            App preview is ready:
 
             ${previewUrl}
 
-            Worker: \`${process.env.WORKER_NAME}\`
+            App Worker: \`${process.env.WORKER_NAME}\`
             Preview ID: \`${process.env.PREVIEW_ID}\`
             Commit: \`${process.env.SHORT_SHA}\``;
 

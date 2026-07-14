@@ -1,0 +1,114 @@
+name: Deploy API
+
+on:
+  push:
+    branches:
+      - main
+    paths:
+      - "apps/server/**"
+      - "packages/**"
+      - "package.json"
+      - "pnpm-lock.yaml"
+      - "pnpm-workspace.yaml"
+      - "turbo.json"
+      - "infra/cdk/**"
+      - ".github/workflows/deploy-api.yml"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  id-token: write
+
+concurrency:
+  group: api-prod
+  cancel-in-progress: false
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    env:
+      AWS_REGION: ${{ vars.AWS_REGION || 'us-west-2' }}
+      CDK_STACK_NAME: token-query-api
+      CORS_ORIGIN: ${{ vars.CORS_ORIGIN || 'https://app.doyouadoreme.online' }}
+      API_CUSTOM_DOMAIN_NAME: ${{ vars.API_CUSTOM_DOMAIN_NAME || 'api.doyouadoreme.online' }}
+      API_CERTIFICATE_ARN: ${{ vars.CERTIFICATE_ARN || 'arn:aws:acm:us-west-2:707605822527:certificate/6dd559f1-2c41-43ab-823a-ba094199fcb1' }}
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v6
+
+      - name: Setup pnpm
+        uses: pnpm/action-setup@v6
+        with:
+          version: 11.8.0
+
+      - name: Setup Node
+        uses: actions/setup-node@v6
+        with:
+          node-version: 22
+          cache: pnpm
+
+      - name: Install dependencies
+        run: pnpm install --frozen-lockfile
+
+      - name: Check deployment settings
+        env:
+          AWS_DEPLOY_ROLE_ARN: ${{ secrets.AWS_DEPLOY_ROLE_ARN }}
+          INTERNAL_PROXY_TOKEN: ${{ secrets.INTERNAL_PROXY_TOKEN }}
+        run: |
+          set -euo pipefail
+
+          test -n "$AWS_REGION"
+          test -n "$AWS_DEPLOY_ROLE_ARN"
+          test -n "$INTERNAL_PROXY_TOKEN"
+          test -n "$CORS_ORIGIN"
+          test -n "$API_CUSTOM_DOMAIN_NAME"
+          test -n "$API_CERTIFICATE_ARN"
+
+      - name: Check server types
+        run: pnpm --filter server check-types
+
+      - name: Check CDK types
+        run: pnpm --filter @token-query/infra-cdk check-types
+
+      - name: Build server
+        run: pnpm --filter server build
+
+      - name: Configure AWS credentials
+        uses: aws-actions/configure-aws-credentials@v6
+        with:
+          role-to-assume: ${{ secrets.AWS_DEPLOY_ROLE_ARN }}
+          aws-region: ${{ env.AWS_REGION }}
+
+      - name: CDK diff
+        run: pnpm --filter @token-query/infra-cdk cdk diff "$CDK_STACK_NAME"
+
+      - name: Deploy CDK stack
+        env:
+          INTERNAL_PROXY_TOKEN: ${{ secrets.INTERNAL_PROXY_TOKEN }}
+          ADMIN_MIGRATION_TOKEN: ${{ secrets.ADMIN_MIGRATION_TOKEN }}
+        run: |
+          set -euo pipefail
+
+          parameters=(
+            "--parameters" "$CDK_STACK_NAME:CorsOrigin=$CORS_ORIGIN"
+            "--parameters" "$CDK_STACK_NAME:ApiCustomDomainName=$API_CUSTOM_DOMAIN_NAME"
+            "--parameters" "$CDK_STACK_NAME:ApiCertificateArn=$API_CERTIFICATE_ARN"
+            "--parameters" "$CDK_STACK_NAME:InternalProxyToken=$INTERNAL_PROXY_TOKEN"
+          )
+
+          if [ -n "${ADMIN_MIGRATION_TOKEN:-}" ]; then
+            parameters+=("--parameters" "$CDK_STACK_NAME:AdminMigrationToken=$ADMIN_MIGRATION_TOKEN")
+          fi
+
+          pnpm --filter @token-query/infra-cdk cdk deploy "$CDK_STACK_NAME" \
+            --require-approval never \
+            "${parameters[@]}"
+
+      - name: Show CDK outputs
+        run: |
+          aws cloudformation describe-stacks \
+            --stack-name "$CDK_STACK_NAME" \
+            --region "$AWS_REGION" \
+            --query 'Stacks[0].Outputs' \
+            --output table

@@ -1,0 +1,25 @@
+{
+  "name": "@token-query/infra-cdk",
+  "version": "0.0.0",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "cdk": "cdk",
+    "synth": "cdk synth",
+    "diff": "cdk diff",
+    "deploy": "cdk deploy",
+    "destroy": "cdk destroy",
+    "check-types": "tsc -b"
+  },
+  "dependencies": {
+    "aws-cdk-lib": "^2.224.0",
+    "constructs": "^10.4.2"
+  },
+  "devDependencies": {
+    "@token-query/config": "workspace:*",
+    "@types/node": "^22.13.14",
+    "aws-cdk": "^2.1033.0",
+    "tsx": "^4.19.2",
+    "typescript": "catalog:"
+  }
+}

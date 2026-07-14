@@ -13,7 +13,7 @@ app.use(
   cors({
     origin: env.CORS_ORIGIN,
     allowMethods: ["GET", "POST", "DELETE", "OPTIONS"],
-    allowHeaders: ["Content-Type", "X-Internal-Proxy-Token", "X-Admin-Migration-Token"],
+    allowHeaders: ["Content-Type", "X-Internal-Proxy-Token", "X-Admin-Migration-Token", "X-Preview-Id"],
   }),
 );
 

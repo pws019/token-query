@@ -1,4 +1,4 @@
-name: Cleanup Cloudflare Worker Preview
+name: Cleanup Preview Resources
 
 on:
   pull_request:
@@ -9,17 +9,19 @@ on:
 
 permissions:
   contents: read
+  id-token: write
   issues: write
   pull-requests: write
 
 concurrency:
-  group: worker-preview-${{ github.event.pull_request.number }}
+  group: preview-cleanup-${{ github.event.pull_request.number }}
   cancel-in-progress: false
 
 jobs:
   cleanup:
     runs-on: ubuntu-latest
     env:
+      AWS_REGION: ${{ vars.AWS_REGION || 'us-west-2' }}
       PREVIEW_BASE_DOMAIN: ${{ vars.PREVIEW_BASE_DOMAIN || 'app.doyouadoreme.online' }}
 
     steps:
@@ -42,39 +44,52 @@ jobs:
             exit 1
           fi
 
-          worker_name="token-query-pr-$preview_id"
-          preview_domain="$preview_id.$PREVIEW_BASE_DOMAIN"
-
           {
             echo "PREVIEW_ID=$preview_id"
-            echo "WORKER_NAME=$worker_name"
-            echo "PREVIEW_DOMAIN=$preview_domain"
+            echo "WORKER_NAME=token-query-pr-$preview_id"
+            echo "PREVIEW_DOMAIN=$preview_id.$PREVIEW_BASE_DOMAIN"
+            echo "STACK_NAME=token-query-preview-api-$preview_id"
+            echo "FUNCTION_NAME=token-query-pr-$preview_id"
           } >> "$GITHUB_ENV"
 
-      - name: Check Cloudflare cleanup settings
+      - name: Checkout
+        uses: actions/checkout@v6
+
+      - name: Setup pnpm
+        uses: pnpm/action-setup@v6
+        with:
+          version: 11.8.0
+
+      - name: Setup Node
+        uses: actions/setup-node@v6
+        with:
+          node-version: 22
+          cache: pnpm
+
+      - name: Install dependencies
+        run: pnpm install --frozen-lockfile
+
+      - name: Check preview cleanup settings
         env:
           CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
           CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+          AWS_DEPLOY_ROLE_ARN: ${{ secrets.AWS_DEPLOY_ROLE_ARN }}
         run: |
           set -euo pipefail
 
           test -n "$CLOUDFLARE_API_TOKEN"
           test -n "$CLOUDFLARE_ACCOUNT_ID"
+          test -n "$AWS_REGION"
+          test -n "$AWS_DEPLOY_ROLE_ARN"
           test -n "$PREVIEW_ID"
           test -n "$WORKER_NAME"
           test -n "$PREVIEW_DOMAIN"
+          test -n "$STACK_NAME"
+          test -n "$FUNCTION_NAME"
 
-      - name: Setup pnpm
-        uses: pnpm/action-setup@v4
-        with:
-          version: 11.8.0
-
-      - name: Setup Node
-        uses: actions/setup-node@v4
-        with:
-          node-version: 22
-
-      - name: Delete Cloudflare Worker preview
+      - name: Delete app preview Worker
+        id: worker_cleanup
+        continue-on-error: true
         env:
           CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
           CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
@@ -83,22 +98,47 @@ jobs:
 
           printf "yes\n" | pnpm dlx wrangler@4 delete --name "$WORKER_NAME"
 
+      - name: Configure AWS credentials
+        uses: aws-actions/configure-aws-credentials@v6
+        with:
+          role-to-assume: ${{ secrets.AWS_DEPLOY_ROLE_ARN }}
+          aws-region: ${{ env.AWS_REGION }}
+
+      - name: Build server asset for CDK synth
+        run: pnpm --filter server build
+
+      - name: Delete backend API preview stack
+        id: api_cleanup
+        run: |
+          set -euo pipefail
+
+          if ! aws cloudformation describe-stacks --stack-name "$STACK_NAME" --region "$AWS_REGION" >/dev/null 2>&1; then
+            echo "Preview stack $STACK_NAME does not exist; skipping AWS cleanup."
+            echo "api_cleanup_status=skipped" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+
+          PREVIEW_ID="$PREVIEW_ID" pnpm --filter @token-query/infra-cdk cdk destroy "$STACK_NAME" --force
+          echo "api_cleanup_status=deleted" >> "$GITHUB_OUTPUT"
+
       - name: Comment cleanup result
         if: always()
         continue-on-error: true
         uses: actions/github-script@v7
         env:
-          CLEANUP_STATUS: ${{ job.status }}
+          WORKER_CLEANUP_STATUS: ${{ steps.worker_cleanup.outcome }}
+          API_CLEANUP_STATUS: ${{ steps.api_cleanup.outputs.api_cleanup_status || steps.api_cleanup.outcome }}
         with:
           script: |
-            const marker = "<!-- token-query-worker-preview-cleanup -->";
+            const marker = "<!-- token-query-preview-cleanup -->";
             const merged = context.payload.pull_request?.merged === true;
-            const status = process.env.CLEANUP_STATUS;
             const body = `${marker}
-            Cloudflare Worker preview cleanup ${status}.
+            Preview cleanup finished.
 
             Preview URL: https://${process.env.PREVIEW_DOMAIN}
-            Worker: \`${process.env.WORKER_NAME}\`
+            App Worker: \`${process.env.WORKER_NAME}\` (${process.env.WORKER_CLEANUP_STATUS})
+            Backend stack: \`${process.env.STACK_NAME}\` (${process.env.API_CLEANUP_STATUS})
+            Backend function: \`${process.env.FUNCTION_NAME}\`
             Preview ID: \`${process.env.PREVIEW_ID}\`
             PR result: ${merged ? "merged" : "closed"}`;
 
