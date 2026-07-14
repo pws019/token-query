@@ -24,16 +24,6 @@ export class PermissionsStack extends Stack {
       description: "Deploy role assumed by GitHub Actions through OIDC for Token Query.",
     });
 
-    const lambdaExecutionRole = new iam.Role(this, "LambdaExecutionRole", {
-      roleName: "token-query-lambda-execution-role",
-      assumedBy: new iam.ServicePrincipal("lambda.amazonaws.com"),
-      description: "Runtime role used by Token Query Lambda functions.",
-      managedPolicies: [
-        iam.ManagedPolicy.fromAwsManagedPolicyName("service-role/AWSLambdaBasicExecutionRole"),
-        iam.ManagedPolicy.fromAwsManagedPolicyName("service-role/AWSLambdaVPCAccessExecutionRole"),
-      ],
-    });
-
     deployRole.addToPolicy(
       new iam.PolicyStatement({
         sid: "AssumeCdkBootstrapRoles",
@@ -133,6 +123,17 @@ export class PermissionsStack extends Stack {
           "rds:ModifyDBInstance",
           "rds:ModifyDBSubnetGroup",
           "rds:RemoveTagsFromResource",
+          "secretsmanager:CreateSecret",
+          "secretsmanager:DeleteSecret",
+          "secretsmanager:DescribeSecret",
+          "secretsmanager:GetSecretValue",
+          "secretsmanager:PutSecretValue",
+          "secretsmanager:RemoveRegionsFromReplication",
+          "secretsmanager:ReplicateSecretToRegions",
+          "secretsmanager:RestoreSecret",
+          "secretsmanager:TagResource",
+          "secretsmanager:UntagResource",
+          "secretsmanager:UpdateSecret",
         ],
         resources: ["*"],
       }),
@@ -170,6 +171,29 @@ export class PermissionsStack extends Stack {
 
     deployRole.addToPolicy(
       new iam.PolicyStatement({
+        sid: "ManageTokenQueryRuntimeRoles",
+        actions: [
+          "iam:AttachRolePolicy",
+          "iam:CreateRole",
+          "iam:DeleteRole",
+          "iam:DeleteRolePolicy",
+          "iam:DetachRolePolicy",
+          "iam:GetRole",
+          "iam:GetRolePolicy",
+          "iam:ListAttachedRolePolicies",
+          "iam:ListRolePolicies",
+          "iam:PassRole",
+          "iam:PutRolePolicy",
+          "iam:TagRole",
+          "iam:UntagRole",
+          "iam:UpdateAssumeRolePolicy",
+        ],
+        resources: [`arn:${this.partition}:iam::${this.account}:role/token-query-*`],
+      }),
+    );
+
+    deployRole.addToPolicy(
+      new iam.PolicyStatement({
         sid: "ManageTokenQueryParameters",
         actions: [
           "ssm:AddTagsToResource",
@@ -184,12 +208,12 @@ export class PermissionsStack extends Stack {
 
     deployRole.addToPolicy(
       new iam.PolicyStatement({
-        sid: "PassTokenQueryRuntimeRoles",
+        sid: "PassTokenQueryRolesToSupportedServices",
         actions: ["iam:PassRole"],
-        resources: [lambdaExecutionRole.roleArn],
+        resources: [`arn:${this.partition}:iam::${this.account}:role/token-query-*`],
         conditions: {
           StringEquals: {
-            "iam:PassedToService": "lambda.amazonaws.com",
+            "iam:PassedToService": ["lambda.amazonaws.com", "ecs-tasks.amazonaws.com", "codebuild.amazonaws.com"],
           },
         },
       }),
@@ -200,17 +224,8 @@ export class PermissionsStack extends Stack {
       stringValue: deployRole.roleArn,
     });
 
-    new ssm.StringParameter(this, "LambdaExecutionRoleArnParam", {
-      parameterName: "/token-query/permissions/lambda-execution-role-arn",
-      stringValue: lambdaExecutionRole.roleArn,
-    });
-
     new CfnOutput(this, "GitHubActionsDeployRoleArn", {
       value: deployRole.roleArn,
-    });
-
-    new CfnOutput(this, "LambdaExecutionRoleArn", {
-      value: lambdaExecutionRole.roleArn,
     });
   }
 }
