@@ -11,7 +11,7 @@ but new infrastructure should be created with CDK instead of SAM.
 
 The new CDK implementation should start from a clean set of stacks:
 
-- `github-oidc`: GitHub Actions OIDC provider and deployment role.
+- `permissions`: GitHub Actions OIDC provider, deployment role, and AWS runtime roles.
 - `foundation`: VPC, subnets, security groups, and database resources.
 - `api`: production API Gateway, Lambda, custom domain, and runtime settings.
 - `preview-api`: PR-scoped backend preview resources.

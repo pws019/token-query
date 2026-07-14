@@ -39,7 +39,7 @@ The CDK implementation is split into four layers.
 Planned stack name:
 
 ```text
-token-query-github-oidc
+token-query-permissions
 ```
 
 Responsibilities:
@@ -47,11 +47,26 @@ Responsibilities:
 - GitHub Actions OIDC provider.
 - GitHub Actions deploy role.
 - IAM policies needed by deployment workflows.
+- Runtime IAM roles for Lambda, CodeBuild, ECS task execution, and ECS tasks
+  as those layers are introduced.
+
+Initial implementation:
+
+- `AWS::IAM::OIDCProvider` for `https://token.actions.githubusercontent.com`.
+- `token-query-github-actions-deploy-role`.
+- `token-query-lambda-execution-role`.
+- `/token-query/permissions/github-actions-deploy-role-arn`.
+- `/token-query/permissions/lambda-execution-role-arn`.
 
 This layer is special because it defines the permissions used by CI/CD itself.
 The first deployment should be performed manually from a trusted local AWS
 session. After it exists, GitHub Actions can deploy the application and preview
 layers.
+
+The permissions stack uses a bootstrapless synthesizer because it contains only
+IAM and SSM resources. This keeps the first deployment independent from CDK
+asset publishing. Later stacks that package Lambda or container assets can use
+the default CDK synthesizer and the normal CDK bootstrap resources.
 
 ### 2. Foundation Layer
 
