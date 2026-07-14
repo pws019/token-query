@@ -1,4 +1,4 @@
-name: Deploy AWS Lambda Preview
+name: Deploy API Preview
 
 on:
   pull_request:
@@ -19,7 +19,7 @@ on:
       - "pnpm-workspace.yaml"
       - "turbo.json"
       - "infra/cdk/**"
-      - ".github/workflows/deploy-lambda-preview.yml"
+      - ".github/workflows/deploy-api-preview.yml"
       - "docs/pr-preview-naming.md"
 
 permissions:
@@ -29,7 +29,7 @@ permissions:
   pull-requests: write
 
 concurrency:
-  group: lambda-preview-${{ github.event.pull_request.number }}
+  group: api-preview-${{ github.event.pull_request.number }}
   cancel-in-progress: true
 
 jobs:
@@ -144,7 +144,7 @@ jobs:
           role-to-assume: ${{ secrets.AWS_DEPLOY_ROLE_ARN }}
           aws-region: ${{ env.AWS_REGION }}
 
-      - name: Deploy preview Lambda stack
+      - name: Deploy API preview stack
         env:
           INTERNAL_PROXY_TOKEN: ${{ secrets.INTERNAL_PROXY_TOKEN }}
           ADMIN_MIGRATION_TOKEN: ${{ secrets.ADMIN_MIGRATION_TOKEN }}
@@ -164,7 +164,7 @@ jobs:
             --require-approval never \
             "${parameters[@]}"
 
-      - name: Comment preview backend result
+      - name: Comment API preview result
         uses: actions/github-script@v7
         env:
           STACK_NAME: ${{ env.STACK_NAME }}
@@ -174,9 +174,9 @@ jobs:
           SHORT_SHA: ${{ env.SHORT_SHA }}
         with:
           script: |
-            const marker = "<!-- token-query-lambda-preview -->";
+            const marker = "<!-- token-query-api-preview -->";
             const body = `${marker}
-            AWS Lambda preview backend is ready.
+            API preview is ready.
 
             Preview URL: https://${process.env.PREVIEW_DOMAIN}
             Preview ID: \`${process.env.PREVIEW_ID}\`
@@ -184,7 +184,7 @@ jobs:
             Function: \`${process.env.FUNCTION_NAME}\`
             Commit: \`${process.env.SHORT_SHA}\`
 
-            Requests from the preview Worker include \`X-Preview-Id: ${process.env.PREVIEW_ID}\`, so the production Lambda router will invoke this preview function.`;
+            Requests from the app preview include \`X-Preview-Id: ${process.env.PREVIEW_ID}\`, so the production API router will invoke this preview API.`;
 
             const { owner, repo } = context.repo;
             const issue_number = context.issue.number;

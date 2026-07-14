@@ -1,4 +1,4 @@
-name: Deploy AWS Lambda API
+name: Deploy API
 
 on:
   push:
@@ -12,7 +12,7 @@ on:
       - "pnpm-workspace.yaml"
       - "turbo.json"
       - "infra/cdk/**"
-      - ".github/workflows/deploy-lambda-api.yml"
+      - ".github/workflows/deploy-api.yml"
   workflow_dispatch:
 
 permissions:
@@ -20,7 +20,7 @@ permissions:
   id-token: write
 
 concurrency:
-  group: lambda-api-prod
+  group: api-prod
   cancel-in-progress: false
 
 jobs:

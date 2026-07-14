@@ -1,4 +1,4 @@
-name: Deploy Cloudflare Worker Preview
+name: Deploy App Preview
 
 on:
   pull_request:
@@ -21,9 +21,9 @@ on:
       - "pnpm-workspace.yaml"
       - "turbo.json"
       - "infra/cdk/**"
-      - ".github/workflows/deploy-lambda-preview.yml"
-      - ".github/workflows/deploy-worker-preview.yml"
-      - ".github/workflows/cleanup-worker-preview.yml"
+      - ".github/workflows/deploy-api-preview.yml"
+      - ".github/workflows/deploy-app-preview.yml"
+      - ".github/workflows/cleanup-preview.yml"
       - "docs/pr-preview-naming.md"
 
 permissions:
@@ -32,7 +32,7 @@ permissions:
   pull-requests: write
 
 concurrency:
-  group: worker-preview-${{ github.event.pull_request.number }}
+  group: app-preview-${{ github.event.pull_request.number }}
   cancel-in-progress: true
 
 jobs:
@@ -199,7 +199,7 @@ jobs:
           test -n "$WORKER_NAME"
           test -n "$PREVIEW_DOMAIN"
 
-      - name: Deploy Cloudflare Worker preview
+      - name: Deploy app preview Worker
         env:
           CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
           CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
@@ -209,7 +209,7 @@ jobs:
           --domain="$PREVIEW_DOMAIN"
           --keep-vars
 
-      - name: Set Cloudflare Worker preview secrets
+      - name: Set app preview Worker secrets
         env:
           CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
           CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
@@ -223,14 +223,14 @@ jobs:
         uses: actions/github-script@v7
         with:
           script: |
-            const marker = "<!-- token-query-worker-preview -->";
+            const marker = "<!-- token-query-app-preview -->";
             const previewUrl = `https://${process.env.PREVIEW_DOMAIN}`;
             const body = `${marker}
-            Cloudflare Worker preview is ready:
+            App preview is ready:
 
             ${previewUrl}
 
-            Worker: \`${process.env.WORKER_NAME}\`
+            App Worker: \`${process.env.WORKER_NAME}\`
             Preview ID: \`${process.env.PREVIEW_ID}\`
             Commit: \`${process.env.SHORT_SHA}\``;
 

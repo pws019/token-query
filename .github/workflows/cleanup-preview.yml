@@ -87,7 +87,7 @@ jobs:
           test -n "$STACK_NAME"
           test -n "$FUNCTION_NAME"
 
-      - name: Delete Cloudflare Worker preview
+      - name: Delete app preview Worker
         id: worker_cleanup
         continue-on-error: true
         env:
@@ -107,7 +107,7 @@ jobs:
       - name: Build server asset for CDK synth
         run: pnpm --filter server build
 
-      - name: Delete AWS API preview stack
+      - name: Delete backend API preview stack
         id: api_cleanup
         run: |
           set -euo pipefail
@@ -136,9 +136,9 @@ jobs:
             Preview cleanup finished.
 
             Preview URL: https://${process.env.PREVIEW_DOMAIN}
-            Worker: \`${process.env.WORKER_NAME}\` (${process.env.WORKER_CLEANUP_STATUS})
-            API stack: \`${process.env.STACK_NAME}\` (${process.env.API_CLEANUP_STATUS})
-            API function: \`${process.env.FUNCTION_NAME}\`
+            App Worker: \`${process.env.WORKER_NAME}\` (${process.env.WORKER_CLEANUP_STATUS})
+            Backend stack: \`${process.env.STACK_NAME}\` (${process.env.API_CLEANUP_STATUS})
+            Backend function: \`${process.env.FUNCTION_NAME}\`
             Preview ID: \`${process.env.PREVIEW_ID}\`
             PR result: ${merged ? "merged" : "closed"}`;
 

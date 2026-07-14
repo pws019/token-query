@@ -78,9 +78,9 @@ NODE_ENV=production
 
 Local development reads the same variable names from `apps/server/.env`. In AWS, do not upload `.env`; configure the values in Lambda environment variables or through your deployment tool. If the database is in a private VPC, attach the Lambda function to the same VPC/subnets/security groups, or use an RDS Proxy endpoint in `DATABASE_URL`.
 
-### SAM Lambda API Deployment
+### CDK API Deployment
 
-The Lambda API is deployed by `.github/workflows/deploy-lambda-api.yml` through AWS SAM. The first SAM migration phase manages the API Lambda and HTTP API Gateway, while reusing the existing VPC subnets, Lambda security group, and Aurora database.
+The backend API is deployed by `.github/workflows/deploy-api.yml` through AWS CDK. The PR preview API is deployed by `.github/workflows/deploy-api-preview.yml`.
 
 Current target runtime shape:
 
@@ -95,142 +95,40 @@ Configure these GitHub repository variables:
 
 ```text
 AWS_REGION=us-west-2
-SAM_STACK_NAME=token-query-api
 CORS_ORIGIN=https://app.doyouadoreme.online
-PRIVATE_SUBNET_IDS_SSM_PARAM=/token-query/network/private-subnet-ids
-LAMBDA_SECURITY_GROUP_ID_SSM_PARAM=/token-query/network/lambda-security-group-id
-LAMBDA_EXECUTION_ROLE_ARN=arn:aws:iam::<account-id>:role/service-role/<lambda-execution-role>
-CERTIFICATE_ARN=arn:aws:acm:<region>:<account-id>:certificate/<certificate-id>
+API_CUSTOM_DOMAIN_NAME=api.doyouadoreme.online
+CERTIFICATE_ARN=arn:aws:acm:us-west-2:<account-id>:certificate/<certificate-id>
+PREVIEW_BASE_DOMAIN=app.doyouadoreme.online
 ```
-
-These are SSM parameter paths, not literal resource IDs - `infra/network-template.yaml` publishes the actual values there on every network stack deploy, and CloudFormation resolves them live when the API stack deploys.
 
 Configure these GitHub repository secrets:
 
 ```text
-AWS_DEPLOY_ROLE_ARN=arn:aws:iam::<account-id>:role/<github-actions-lambda-deploy-role>
-DB_PASSWORD=<aurora-master-password>   # must match DbMasterPassword used to deploy infra/db-template.yaml
+AWS_DEPLOY_ROLE_ARN=arn:aws:iam::<account-id>:role/<github-actions-deploy-role>
 INTERNAL_PROXY_TOKEN=shared-secret-with-cloudflare-worker
 ADMIN_MIGRATION_TOKEN=temporary-admin-token   # optional; clear after database initialization
 ```
 
-`DATABASE_URL` is no longer a stored secret - the API stack builds it at deploy time from `DB_PASSWORD` plus the Aurora endpoint it reads live from the `/token-query/db/cluster-endpoint` SSM parameter (published by `infra/db-template.yaml`). This means the connection string always points at whatever Aurora endpoint currently exists, even after the DB stack is torn down and recreated (recreating gives the cluster a new endpoint hostname; only the password needs to stay in sync).
+The CDK foundation stack publishes VPC, security group, database endpoint, and database secret references through SSM parameters. The API stack builds `DATABASE_URL` with a Secrets Manager dynamic reference during deployment, so CI does not need the database password.
 
-The recommended AWS credential flow is GitHub OIDC. Because SAM deploys through CloudFormation and creates Lambda/API Gateway resources, the IAM role used by `AWS_DEPLOY_ROLE_ARN` needs CloudFormation, S3 artifact, Lambda, API Gateway, IAM role, logs, and VPC attachment permissions.
-
-`sam deploy --resolve-s3` also creates or updates the SAM managed artifact stack named `aws-sam-cli-managed-default` the first time it runs. Include both the application stack and the SAM managed stack in the deployment role policy:
-
-```json
-{
-  "Version": "2012-10-17",
-  "Statement": [
-    {
-      "Effect": "Allow",
-      "Action": [
-        "cloudformation:CreateChangeSet",
-        "cloudformation:CreateStack",
-        "cloudformation:DeleteChangeSet",
-        "cloudformation:DescribeChangeSet",
-        "cloudformation:DescribeStackEvents",
-        "cloudformation:DescribeStacks",
-        "cloudformation:ExecuteChangeSet",
-        "cloudformation:GetTemplate",
-        "cloudformation:UpdateStack"
-      ],
-      "Resource": [
-        "arn:aws:cloudformation:us-west-2:<account-id>:stack/token-query-api/*",
-        "arn:aws:cloudformation:us-west-2:<account-id>:stack/aws-sam-cli-managed-default/*"
-      ]
-    },
-    {
-      "Effect": "Allow",
-      "Action": [
-        "s3:CreateBucket",
-        "s3:GetBucketLocation",
-        "s3:GetObject",
-        "s3:ListBucket",
-        "s3:PutObject"
-      ],
-      "Resource": [
-        "arn:aws:s3:::aws-sam-cli-managed-default-*",
-        "arn:aws:s3:::aws-sam-cli-managed-default-*/*"
-      ]
-    },
-    {
-      "Effect": "Allow",
-      "Action": [
-        "lambda:AddPermission",
-        "lambda:CreateFunction",
-        "lambda:DeleteFunction",
-        "lambda:GetFunction",
-        "lambda:GetFunctionConfiguration",
-        "lambda:RemovePermission",
-        "lambda:TagResource",
-        "lambda:UpdateFunctionCode",
-        "lambda:UpdateFunctionConfiguration"
-      ],
-      "Resource": "arn:aws:lambda:us-west-2:<account-id>:function:token-query-api-*"
-    },
-    {
-      "Effect": "Allow",
-      "Action": [
-        "apigateway:DELETE",
-        "apigateway:GET",
-        "apigateway:PATCH",
-        "apigateway:POST",
-        "apigateway:PUT"
-      ],
-      "Resource": "arn:aws:apigateway:us-west-2::/*"
-    },
-    {
-      "Effect": "Allow",
-      "Action": [
-        "iam:AttachRolePolicy",
-        "iam:CreateRole",
-        "iam:DeleteRole",
-        "iam:DetachRolePolicy",
-        "iam:GetRole",
-        "iam:PassRole",
-        "iam:TagRole"
-      ],
-      "Resource": "arn:aws:iam::<account-id>:role/token-query-api-*"
-    },
-    {
-      "Effect": "Allow",
-      "Action": [
-        "logs:CreateLogGroup",
-        "logs:DeleteLogGroup",
-        "logs:DescribeLogGroups",
-        "logs:PutRetentionPolicy",
-        "logs:TagResource"
-      ],
-      "Resource": "arn:aws:logs:us-west-2:<account-id>:log-group:/aws/lambda/token-query-api-*"
-    },
-    {
-      "Effect": "Allow",
-      "Action": [
-        "ec2:DescribeSecurityGroups",
-        "ec2:DescribeSubnets",
-        "ec2:DescribeVpcs"
-      ],
-      "Resource": "*"
-    }
-  ]
-}
-```
-
-For local deployment, build the server before SAM packages the Lambda artifact:
+For local deployment, build the server before CDK packages the Lambda artifact:
 
 ```bash
 pnpm --filter server build
-cd infra
-sam build
-sam deploy
+pnpm --filter @token-query/infra-cdk cdk deploy token-query-api
 ```
 
-SAM templates and config live under `infra/`: `infra/template.yaml` (Lambda + HTTP API, deployed by CI), `infra/network-template.yaml` and `infra/db-template.yaml` (VPC/Aurora, deployed manually only - never wired into the auto-triggered pipeline). `infra/samconfig.toml` stores non-secret deployment defaults for the API stack. Pass secret parameters through GitHub Actions secrets, `sam deploy --parameter-overrides`, or a future Secrets Manager/SSM integration.
+Preview requests use the same public API origin. The app preview Worker sends `X-Preview-Id`, and the production API Lambda routes matching requests to `token-query-pr-<preview-id>` when that preview function exists.
 
-The SAM stack outputs the new API endpoint as `ApiEndpoint`. After verifying `/api/health`, update the Cloudflare Worker `LAMBDA_API_ORIGIN` value to this endpoint when you are ready to cut traffic over from the manually created API Gateway.
+GitHub Actions workflows are grouped by the public layer names:
+
+```text
+deploy-api.yml           # production backend API
+deploy-api-preview.yml   # PR backend API preview
+deploy-app.yml           # production frontend app Worker
+deploy-app-preview.yml   # PR frontend app Worker preview
+cleanup-preview.yml      # PR preview cleanup for both app and API resources
+```
 
 Keep production runtime settings out of source control:
 
