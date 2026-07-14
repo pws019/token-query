@@ -63,10 +63,11 @@ The first deployment should be performed manually from a trusted local AWS
 session. After it exists, GitHub Actions can deploy the application and preview
 layers.
 
-The permissions stack uses a bootstrapless synthesizer because it contains only
-IAM and SSM resources. This keeps the first deployment independent from CDK
-asset publishing. Later stacks that package Lambda or container assets can use
-the default CDK synthesizer and the normal CDK bootstrap resources.
+The permissions stack uses the legacy synthesizer because it contains only IAM
+and SSM resources. This makes the first deployment use the currently
+authenticated local AWS identity instead of the CDK bootstrap deployment roles.
+Later stacks that package Lambda or container assets can use the default CDK
+synthesizer and the normal CDK bootstrap resources.
 
 ### 2. Foundation Layer
 

@@ -1,5 +1,5 @@
 #!/usr/bin/env node
-import { App, BootstraplessSynthesizer } from "aws-cdk-lib";
+import { App, LegacyStackSynthesizer } from "aws-cdk-lib";
 
 import { ApiStack } from "../lib/api-stack";
 import { FoundationStack } from "../lib/foundation-stack";
@@ -15,7 +15,7 @@ const env = {
 
 new PermissionsStack(app, "token-query-permissions", {
   env,
-  synthesizer: new BootstraplessSynthesizer(),
+  synthesizer: new LegacyStackSynthesizer(),
 });
 new FoundationStack(app, "token-query-foundation", { env });
 new ApiStack(app, "token-query-api", { env });
