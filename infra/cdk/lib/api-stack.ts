@@ -74,6 +74,12 @@ export class ApiStack extends Stack {
         iam.ManagedPolicy.fromAwsManagedPolicyName("service-role/AWSLambdaVPCAccessExecutionRole"),
       ],
     });
+    executionRole.addToPolicy(
+      new iam.PolicyStatement({
+        actions: ["lambda:InvokeFunction"],
+        resources: [`arn:${this.partition}:lambda:${this.region}:${this.account}:function:token-query-pr-*`],
+      }),
+    );
 
     const logGroup = new logs.CfnLogGroup(this, "TokenQueryFunctionLogGroup", {
       logGroupName: `/aws/lambda/${functionName}`,
@@ -115,6 +121,7 @@ export class ApiStack extends Stack {
       environment: {
         variables: {
           NODE_ENV: "production",
+          APP_ENV: "prod",
           CORS_ORIGIN: corsOrigin.valueAsString,
           DATABASE_URL: Fn.sub(
             "postgresql://postgres:{{resolve:secretsmanager:${SecretId}:SecretString:password}}@${DbClusterEndpoint}:5432/postgres?sslmode=require&uselibpqcompat=true",

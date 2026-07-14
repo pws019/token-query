@@ -150,6 +150,9 @@ Responsibilities:
 - API routes and `$default` auto-deploy stage.
 - API Gateway custom domain for `api.doyouadoreme.online`.
 - Root API mapping from `api.doyouadoreme.online` to the `$default` stage.
+- Preview routing in the production Lambda entrypoint. When `APP_ENV=prod` and
+  `X-Preview-Id` is present, the Lambda tries to invoke
+  `token-query-pr-<preview-id>` before falling back to production logic.
 - Outputs such as `ApiEndpoint`, `CustomDomainUrl`, `CustomDomainRegionalDomainName`,
   and `FunctionName`.
 
@@ -174,6 +177,8 @@ Implementation status:
   admin database initialization.
 - Creates the API Gateway custom domain with the existing ACM certificate:
   `arn:aws:acm:us-west-2:707605822527:certificate/6dd559f1-2c41-43ab-823a-ba094199fcb1`.
+- Grants the production Lambda permission to invoke preview functions matching
+  `token-query-pr-*`.
 - After deployment, Cloudflare DNS for `api.doyouadoreme.online` should point to
   the stack output `CustomDomainRegionalDomainName`.
 
@@ -197,12 +202,27 @@ Responsibilities:
 
 - PR-scoped Lambda function.
 - PR-scoped CloudWatch log group.
-- Optional PR-scoped HTTP API Gateway.
+- No PR-scoped API Gateway. Preview Lambdas are invoked by the production Lambda
+  router using the function name `token-query-pr-<preview-id>`.
 - Preview ID runtime configuration.
 - Destroy path when a PR is closed or merged.
 
 This layer should be short-lived and cheap. It reuses the foundation layer and
 only duplicates application compute resources.
+
+The preview backend does not create its own custom domain or public API Gateway.
+The external backend origin remains:
+
+```text
+https://api.doyouadoreme.online
+```
+
+When the frontend preview Worker sends `X-Preview-Id: <preview-id>`, the
+production Lambda entrypoint checks whether it is running with `APP_ENV=prod`.
+If so, it attempts to invoke `token-query-pr-<preview-id>` with the original
+API Gateway event. If the preview function does not exist, the request falls
+back to the production handler. Preview Lambdas run with `APP_ENV=preview`, so
+they do not recursively route preview requests.
 
 ## Implementation Order
 

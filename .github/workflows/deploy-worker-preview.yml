@@ -10,14 +10,18 @@ on:
     branches:
       - main-v2
     paths:
+      - "apps/server/**"
       - "apps/web/**"
       - "packages/api/**"
+      - "packages/db/**"
       - "packages/env/**"
       - "packages/ui/**"
       - "package.json"
       - "pnpm-lock.yaml"
       - "pnpm-workspace.yaml"
       - "turbo.json"
+      - "infra/cdk/**"
+      - ".github/workflows/deploy-lambda-preview.yml"
       - ".github/workflows/deploy-worker-preview.yml"
       - ".github/workflows/cleanup-worker-preview.yml"
       - "docs/pr-preview-naming.md"
@@ -36,7 +40,6 @@ jobs:
     runs-on: ubuntu-latest
     env:
       PREVIEW_BASE_DOMAIN: ${{ vars.PREVIEW_BASE_DOMAIN || 'app.doyouadoreme.online' }}
-      PREVIEW_LAMBDA_API_ORIGIN_VALUE: ${{ vars.PREVIEW_LAMBDA_API_ORIGIN }}
       LAMBDA_API_ORIGIN_VALUE: ${{ vars.LAMBDA_API_ORIGIN }}
 
     steps:
@@ -118,13 +121,8 @@ jobs:
         run: |
           set -euo pipefail
 
-          if [[ -n "${PREVIEW_LAMBDA_API_ORIGIN_VALUE:-}" ]]; then
-            lambda_api_origin_source="PREVIEW_LAMBDA_API_ORIGIN"
-            lambda_api_origin="$PREVIEW_LAMBDA_API_ORIGIN_VALUE"
-          else
-            lambda_api_origin_source="LAMBDA_API_ORIGIN"
-            lambda_api_origin="$LAMBDA_API_ORIGIN_VALUE"
-          fi
+          lambda_api_origin_source="LAMBDA_API_ORIGIN"
+          lambda_api_origin="$LAMBDA_API_ORIGIN_VALUE"
 
           {
             echo "LAMBDA_API_ORIGIN_SOURCE=$lambda_api_origin_source"

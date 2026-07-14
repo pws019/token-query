@@ -19,4 +19,11 @@ new PermissionsStack(app, "token-query-permissions", {
 });
 new FoundationStack(app, "token-query-foundation", { env });
 new ApiStack(app, "token-query-api", { env });
-new PreviewApiStack(app, "token-query-preview-api", { env });
+
+const previewId = process.env.PREVIEW_ID;
+if (previewId) {
+  new PreviewApiStack(app, `token-query-preview-api-${previewId}`, {
+    env,
+    previewId,
+  });
+}

@@ -11,6 +11,7 @@
     "start": "node dist/index.mjs"
   },
   "dependencies": {
+    "@aws-sdk/client-lambda": "^3.1085.0",
     "@hono/node-server": "^1.14.4",
     "@hono/trpc-server": "^0.4.0",
     "@token-query/api": "workspace:*",

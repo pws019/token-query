@@ -8,6 +8,8 @@ healthRoutes.get("/", (c) => {
     ok: true,
     service: "token-query-api",
     version: "lambda-workflow-check-2026-07-04",
-    environment: env.NODE_ENV,
+    nodeEnv: env.NODE_ENV,
+    appEnv: env.APP_ENV,
+    previewId: env.PREVIEW_ID,
   });
 });

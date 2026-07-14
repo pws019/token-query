@@ -1,0 +1,213 @@
+name: Deploy AWS Lambda Preview
+
+on:
+  pull_request:
+    types:
+      - opened
+      - reopened
+      - synchronize
+      - edited
+    branches:
+      - main-v2
+    paths:
+      - "apps/server/**"
+      - "packages/api/**"
+      - "packages/db/**"
+      - "packages/env/**"
+      - "package.json"
+      - "pnpm-lock.yaml"
+      - "pnpm-workspace.yaml"
+      - "turbo.json"
+      - "infra/cdk/**"
+      - ".github/workflows/deploy-lambda-preview.yml"
+      - "docs/pr-preview-naming.md"
+
+permissions:
+  contents: read
+  id-token: write
+  issues: write
+  pull-requests: write
+
+concurrency:
+  group: lambda-preview-${{ github.event.pull_request.number }}
+  cancel-in-progress: true
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    env:
+      AWS_REGION: ${{ vars.AWS_REGION || 'us-west-2' }}
+      PREVIEW_BASE_DOMAIN: ${{ vars.PREVIEW_BASE_DOMAIN || 'app.doyouadoreme.online' }}
+
+    steps:
+      - name: Validate PR preview naming
+        id: preview
+        env:
+          BRANCH_NAME: ${{ github.head_ref }}
+          PR_TITLE: ${{ github.event.pull_request.title }}
+          COMMIT_SHA: ${{ github.event.pull_request.head.sha }}
+        run: |
+          set -euo pipefail
+
+          branch_regex='^(bug|feat|fix|chore|hotfix)/((bug|feat|fix|chore|hotfix)-[0-9]+)-[a-z0-9-]+$'
+          title_regex='^((bug|feat|fix|chore|hotfix)-[0-9]+):'
+
+          if [[ ! "$BRANCH_NAME" =~ $branch_regex ]]; then
+            echo "::error::Branch name must match <type>/<preview-id>-<short-description>, for example bug/bug-111-login-token-expiry."
+            exit 1
+          fi
+
+          branch_preview_id="${BASH_REMATCH[2]}"
+
+          if [[ ! "$PR_TITLE" =~ $title_regex ]]; then
+            echo "::error::PR title must start with <preview-id>:, for example bug-111: 修复登录 token 过期问题."
+            exit 1
+          fi
+
+          title_preview_id="${BASH_REMATCH[1]}"
+
+          if [[ "$branch_preview_id" != "$title_preview_id" ]]; then
+            echo "::error::Preview ID mismatch. Branch uses '$branch_preview_id' but PR title uses '$title_preview_id'."
+            exit 1
+          fi
+
+          if (( ${#branch_preview_id} > 40 )); then
+            echo "::error::Preview ID is too long. Keep it at 40 characters or fewer."
+            exit 1
+          fi
+
+          stack_name="token-query-preview-api-$branch_preview_id"
+          function_name="token-query-pr-$branch_preview_id"
+          preview_domain="$branch_preview_id.$PREVIEW_BASE_DOMAIN"
+          short_sha="${COMMIT_SHA:0:7}"
+
+          {
+            echo "preview_id=$branch_preview_id"
+            echo "stack_name=$stack_name"
+            echo "function_name=$function_name"
+            echo "preview_domain=$preview_domain"
+            echo "short_sha=$short_sha"
+          } >> "$GITHUB_OUTPUT"
+
+          {
+            echo "PREVIEW_ID=$branch_preview_id"
+            echo "STACK_NAME=$stack_name"
+            echo "FUNCTION_NAME=$function_name"
+            echo "PREVIEW_DOMAIN=$preview_domain"
+            echo "SHORT_SHA=$short_sha"
+          } >> "$GITHUB_ENV"
+
+      - name: Checkout
+        uses: actions/checkout@v6
+
+      - name: Setup pnpm
+        uses: pnpm/action-setup@v6
+        with:
+          version: 11.8.0
+
+      - name: Setup Node
+        uses: actions/setup-node@v6
+        with:
+          node-version: 22
+          cache: pnpm
+
+      - name: Install dependencies
+        run: pnpm install --frozen-lockfile
+
+      - name: Check deployment settings
+        env:
+          AWS_DEPLOY_ROLE_ARN: ${{ secrets.AWS_DEPLOY_ROLE_ARN }}
+          INTERNAL_PROXY_TOKEN: ${{ secrets.INTERNAL_PROXY_TOKEN }}
+        run: |
+          set -euo pipefail
+
+          test -n "$AWS_REGION"
+          test -n "$AWS_DEPLOY_ROLE_ARN"
+          test -n "$INTERNAL_PROXY_TOKEN"
+          test -n "$PREVIEW_ID"
+          test -n "$STACK_NAME"
+          test -n "$FUNCTION_NAME"
+          test -n "$PREVIEW_DOMAIN"
+
+      - name: Check server types
+        run: pnpm --filter server check-types
+
+      - name: Check CDK types
+        run: pnpm --filter @token-query/infra-cdk check-types
+
+      - name: Build server
+        run: pnpm --filter server build
+
+      - name: Configure AWS credentials
+        uses: aws-actions/configure-aws-credentials@v6
+        with:
+          role-to-assume: ${{ secrets.AWS_DEPLOY_ROLE_ARN }}
+          aws-region: ${{ env.AWS_REGION }}
+
+      - name: Deploy preview Lambda stack
+        env:
+          INTERNAL_PROXY_TOKEN: ${{ secrets.INTERNAL_PROXY_TOKEN }}
+          ADMIN_MIGRATION_TOKEN: ${{ secrets.ADMIN_MIGRATION_TOKEN }}
+        run: |
+          set -euo pipefail
+
+          parameters=(
+            "--parameters" "$STACK_NAME:CorsOrigin=https://$PREVIEW_DOMAIN"
+            "--parameters" "$STACK_NAME:InternalProxyToken=$INTERNAL_PROXY_TOKEN"
+          )
+
+          if [ -n "${ADMIN_MIGRATION_TOKEN:-}" ]; then
+            parameters+=("--parameters" "$STACK_NAME:AdminMigrationToken=$ADMIN_MIGRATION_TOKEN")
+          fi
+
+          PREVIEW_ID="$PREVIEW_ID" pnpm --filter @token-query/infra-cdk cdk deploy "$STACK_NAME" \
+            --require-approval never \
+            "${parameters[@]}"
+
+      - name: Comment preview backend result
+        uses: actions/github-script@v7
+        env:
+          STACK_NAME: ${{ env.STACK_NAME }}
+          FUNCTION_NAME: ${{ env.FUNCTION_NAME }}
+          PREVIEW_ID: ${{ env.PREVIEW_ID }}
+          PREVIEW_DOMAIN: ${{ env.PREVIEW_DOMAIN }}
+          SHORT_SHA: ${{ env.SHORT_SHA }}
+        with:
+          script: |
+            const marker = "<!-- token-query-lambda-preview -->";
+            const body = `${marker}
+            AWS Lambda preview backend is ready.
+
+            Preview URL: https://${process.env.PREVIEW_DOMAIN}
+            Preview ID: \`${process.env.PREVIEW_ID}\`
+            Stack: \`${process.env.STACK_NAME}\`
+            Function: \`${process.env.FUNCTION_NAME}\`
+            Commit: \`${process.env.SHORT_SHA}\`
+
+            Requests from the preview Worker include \`X-Preview-Id: ${process.env.PREVIEW_ID}\`, so the production Lambda router will invoke this preview function.`;
+
+            const { owner, repo } = context.repo;
+            const issue_number = context.issue.number;
+            const comments = await github.paginate(github.rest.issues.listComments, {
+              owner,
+              repo,
+              issue_number,
+              per_page: 100,
+            });
+            const existing = comments.find((comment) => comment.body?.includes(marker));
+
+            if (existing) {
+              await github.rest.issues.updateComment({
+                owner,
+                repo,
+                comment_id: existing.id,
+                body,
+              });
+            } else {
+              await github.rest.issues.createComment({
+                owner,
+                repo,
+                issue_number,
+                body,
+              });
+            }
