@@ -7,7 +7,7 @@ healthRoutes.get("/", (c) => {
   return c.json({
     ok: true,
     service: "token-query-api",
-    version: "lambda-workflow-check-2026-07-04",
+    version: "lambda-workflow-check-2026-07-14-feat-005",
     nodeEnv: env.NODE_ENV,
     appEnv: env.APP_ENV,
     previewId: env.PREVIEW_ID,
