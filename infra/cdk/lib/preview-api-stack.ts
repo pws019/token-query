@@ -47,6 +47,12 @@ export class PreviewApiStack extends Stack {
       description: "Optional token used to run admin database initialization.",
     });
 
+    const goServiceOrigin = new CfnParameter(this, "GoServiceOrigin", {
+      type: "String",
+      default: "http://go.token-query.internal:8080",
+      description: "Internal Go service origin resolved through Cloud Map.",
+    });
+
     const privateSubnetIds = new CfnParameter(this, "PrivateSubnetIds", {
       type: "AWS::SSM::Parameter::Value<List<AWS::EC2::Subnet::Id>>",
       default: "/token-query/foundation/private-subnet-ids",
@@ -120,6 +126,7 @@ export class PreviewApiStack extends Stack {
           ),
           INTERNAL_PROXY_TOKEN: internalProxyToken.valueAsString,
           ADMIN_MIGRATION_TOKEN: adminMigrationToken.valueAsString,
+          GO_SERVICE_ORIGIN: goServiceOrigin.valueAsString,
         },
       },
     });
