@@ -295,7 +295,7 @@ back to the production handler. Preview Lambdas run with `APP_ENV=preview`, so
 
 ### 5. Go Application Preview Layer
 
-Planned stack naming pattern:
+Stack naming pattern:
 
 ```text
 token-query-preview-go-<preview-id>
@@ -308,6 +308,13 @@ Responsibilities:
 - PR-scoped CloudWatch log group `/ecs/token-query-go-pr-<preview-id>`.
 - PR-scoped Cloud Map service `go-<preview-id>.token-query.internal`.
 - Image tag parameter, usually `<preview-id>-<short-sha>`.
+
+Implemented workflows:
+
+- `Deploy Go Preview` builds the Go image through CodeBuild and deploys
+  `token-query-preview-go-<preview-id>`.
+- `Cleanup Go Preview` destroys the same stack when the PR is closed or when
+  manually dispatched with a `preview_id`.
 
 This layer should copy application runtime resources only. It reuses:
 

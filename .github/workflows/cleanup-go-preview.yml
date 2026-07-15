@@ -1,4 +1,4 @@
-name: Cleanup Lambda Preview
+name: Cleanup Go Preview
 
 on:
   pull_request:
@@ -7,17 +7,11 @@ on:
     branches:
       - main-v2
     paths:
-      - "apps/server/**"
-      - "packages/api/**"
-      - "packages/db/**"
-      - "packages/env/**"
-      - "package.json"
-      - "pnpm-lock.yaml"
-      - "pnpm-workspace.yaml"
-      - "turbo.json"
+      - "apps/go-service/**"
+      - "infra/codebuild/**"
       - "infra/cdk/**"
-      - ".github/workflows/deploy-lambda-preview.yml"
-      - ".github/workflows/cleanup-lambda-preview.yml"
+      - ".github/workflows/deploy-go-preview.yml"
+      - ".github/workflows/cleanup-go-preview.yml"
       - "docs/pr-preview-naming.md"
   workflow_dispatch:
     inputs:
@@ -33,7 +27,7 @@ permissions:
   pull-requests: write
 
 concurrency:
-  group: lambda-preview-cleanup-${{ github.event.pull_request.number || inputs.preview_id }}
+  group: go-preview-cleanup-${{ github.event.pull_request.number || inputs.preview_id }}
   cancel-in-progress: false
 
 jobs:
@@ -74,8 +68,9 @@ jobs:
 
           {
             echo "PREVIEW_ID=$preview_id"
-            echo "STACK_NAME=token-query-preview-api-$preview_id"
-            echo "FUNCTION_NAME=token-query-pr-$preview_id"
+            echo "STACK_NAME=token-query-preview-go-$preview_id"
+            echo "SERVICE_NAME=token-query-go-pr-$preview_id"
+            echo "GO_SERVICE_ORIGIN=http://go-$preview_id.token-query.internal:8080"
           } >> "$GITHUB_ENV"
 
       - name: Checkout
@@ -95,7 +90,7 @@ jobs:
       - name: Install dependencies
         run: pnpm install --frozen-lockfile
 
-      - name: Check Lambda preview cleanup settings
+      - name: Check Go preview cleanup settings
         env:
           AWS_DEPLOY_ROLE_ARN: ${{ secrets.AWS_DEPLOY_ROLE_ARN }}
         run: |
@@ -105,7 +100,7 @@ jobs:
           test -n "$AWS_DEPLOY_ROLE_ARN"
           test -n "$PREVIEW_ID"
           test -n "$STACK_NAME"
-          test -n "$FUNCTION_NAME"
+          test -n "$SERVICE_NAME"
 
       - name: Configure AWS credentials
         uses: aws-actions/configure-aws-credentials@v6
@@ -113,38 +108,36 @@ jobs:
           role-to-assume: ${{ secrets.AWS_DEPLOY_ROLE_ARN }}
           aws-region: ${{ env.AWS_REGION }}
 
-      - name: Build server asset for CDK synth
-        run: pnpm --filter server build
-
-      - name: Delete Lambda preview stack
-        id: lambda_cleanup
+      - name: Delete Go preview stack
+        id: go_cleanup
         run: |
           set -euo pipefail
 
           if ! aws cloudformation describe-stacks --stack-name "$STACK_NAME" --region "$AWS_REGION" >/dev/null 2>&1; then
             echo "Preview stack $STACK_NAME does not exist; skipping AWS cleanup."
-            echo "lambda_cleanup_status=skipped" >> "$GITHUB_OUTPUT"
+            echo "go_cleanup_status=skipped" >> "$GITHUB_OUTPUT"
             exit 0
           fi
 
-          CDK_STACK_SCOPE=api PREVIEW_ID="$PREVIEW_ID" PREVIEW_STACK_SCOPE=api pnpm --filter @token-query/infra-cdk cdk destroy "$STACK_NAME" --force
-          echo "lambda_cleanup_status=deleted" >> "$GITHUB_OUTPUT"
+          CDK_STACK_SCOPE=go PREVIEW_ID="$PREVIEW_ID" PREVIEW_STACK_SCOPE=go pnpm --filter @token-query/infra-cdk cdk destroy "$STACK_NAME" --force
+          echo "go_cleanup_status=deleted" >> "$GITHUB_OUTPUT"
 
       - name: Comment cleanup result
         if: always() && github.event_name == 'pull_request'
         continue-on-error: true
         uses: actions/github-script@v7
         env:
-          LAMBDA_CLEANUP_STATUS: ${{ steps.lambda_cleanup.outputs.lambda_cleanup_status || steps.lambda_cleanup.outcome }}
+          GO_CLEANUP_STATUS: ${{ steps.go_cleanup.outputs.go_cleanup_status || steps.go_cleanup.outcome }}
         with:
           script: |
-            const marker = "<!-- token-query-lambda-preview-cleanup -->";
+            const marker = "<!-- token-query-go-preview-cleanup -->";
             const merged = context.payload.pull_request?.merged === true;
             const body = `${marker}
-            Lambda preview cleanup finished.
+            Go preview cleanup finished.
 
-            Stack: \`${process.env.STACK_NAME}\` (${process.env.LAMBDA_CLEANUP_STATUS})
-            Function: \`${process.env.FUNCTION_NAME}\`
+            Stack: \`${process.env.STACK_NAME}\` (${process.env.GO_CLEANUP_STATUS})
+            ECS service: \`${process.env.SERVICE_NAME}\`
+            Cloud Map origin: \`${process.env.GO_SERVICE_ORIGIN}\`
             Preview ID: \`${process.env.PREVIEW_ID}\`
             PR result: ${merged ? "merged" : "closed"}`;
 
@@ -181,12 +174,13 @@ jobs:
       - name: Write manual cleanup summary
         if: always() && github.event_name == 'workflow_dispatch'
         env:
-          LAMBDA_CLEANUP_STATUS: ${{ steps.lambda_cleanup.outputs.lambda_cleanup_status || steps.lambda_cleanup.outcome }}
+          GO_CLEANUP_STATUS: ${{ steps.go_cleanup.outputs.go_cleanup_status || steps.go_cleanup.outcome }}
         run: |
           {
-            echo "## Lambda preview cleanup"
+            echo "## Go preview cleanup"
             echo
             echo "Preview ID: \`$PREVIEW_ID\`"
-            echo "Stack: \`$STACK_NAME\` ($LAMBDA_CLEANUP_STATUS)"
-            echo "Function: \`$FUNCTION_NAME\`"
+            echo "Stack: \`$STACK_NAME\` ($GO_CLEANUP_STATUS)"
+            echo "ECS service: \`$SERVICE_NAME\`"
+            echo "Cloud Map origin: \`$GO_SERVICE_ORIGIN\`"
           } >> "$GITHUB_STEP_SUMMARY"

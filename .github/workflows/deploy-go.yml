@@ -146,7 +146,7 @@ jobs:
         run: |
           set -euo pipefail
 
-          pnpm --filter @token-query/infra-cdk cdk deploy "$CDK_STACK_NAME" \
+          CDK_STACK_SCOPE=go pnpm --filter @token-query/infra-cdk cdk deploy "$CDK_STACK_NAME" \
             --require-approval never \
             --parameters "$CDK_STACK_NAME:ImageTag=$IMAGE_TAG"
 

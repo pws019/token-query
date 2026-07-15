@@ -104,7 +104,7 @@ jobs:
             parameters+=("--parameters" "$CDK_STACK_NAME:AdminMigrationToken=$ADMIN_MIGRATION_TOKEN")
           fi
 
-          pnpm --filter @token-query/infra-cdk cdk deploy "$CDK_STACK_NAME" \
+          CDK_STACK_SCOPE=api pnpm --filter @token-query/infra-cdk cdk deploy "$CDK_STACK_NAME" \
             --require-approval never \
             "${parameters[@]}"
 
