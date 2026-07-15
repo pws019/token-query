@@ -168,6 +168,20 @@ export class FoundationStack extends Stack {
       tags: nameTags("token-query-go-sg"),
     });
 
+    const migrationSecurityGroup = new ec2.CfnSecurityGroup(this, "MigrationSecurityGroup", {
+      groupDescription: "Security group for Token Query database migration CodeBuild jobs.",
+      groupName: "token-query-migration-sg",
+      vpcId: vpc.ref,
+      securityGroupEgress: [
+        {
+          cidrIp: "0.0.0.0/0",
+          ipProtocol: "-1",
+          description: "Allow all outbound traffic.",
+        },
+      ],
+      tags: nameTags("token-query-migration-sg"),
+    });
+
     new ec2.CfnSecurityGroupIngress(this, "DbIngressFromLambda", {
       groupId: dbSecurityGroup.attrGroupId,
       sourceSecurityGroupId: lambdaSecurityGroup.attrGroupId,
@@ -184,6 +198,15 @@ export class FoundationStack extends Stack {
       fromPort: 5432,
       toPort: 5432,
       description: "PostgreSQL from Token Query Go services.",
+    });
+
+    new ec2.CfnSecurityGroupIngress(this, "DbIngressFromMigration", {
+      groupId: dbSecurityGroup.attrGroupId,
+      sourceSecurityGroupId: migrationSecurityGroup.attrGroupId,
+      ipProtocol: "tcp",
+      fromPort: 5432,
+      toPort: 5432,
+      description: "PostgreSQL from Token Query database migration CodeBuild jobs.",
     });
 
     new ec2.CfnSecurityGroupIngress(this, "GoIngressFromLambda", {
@@ -382,6 +405,124 @@ export class FoundationStack extends Stack {
     });
     dbInstance.addDependency(dbCluster);
 
+    const dbMigrationCodeBuildRole = new iam.Role(this, "DbMigrationCodeBuildRole", {
+      roleName: "token-query-db-migrate-codebuild-role",
+      assumedBy: new iam.ServicePrincipal("codebuild.amazonaws.com"),
+      description: "Service role used by CodeBuild to run Token Query database migrations inside the VPC.",
+    });
+
+    const dbMigrationLogsPolicy = new iam.Policy(this, "DbMigrationCodeBuildLogsPolicy", {
+      statements: [
+        new iam.PolicyStatement({
+          actions: [
+            "logs:CreateLogGroup",
+            "logs:CreateLogStream",
+            "logs:PutLogEvents",
+          ],
+          resources: [
+            Fn.sub("arn:${AWS::Partition}:logs:${AWS::Region}:${AWS::AccountId}:log-group:/aws/codebuild/token-query-db-migrate"),
+            Fn.sub("arn:${AWS::Partition}:logs:${AWS::Region}:${AWS::AccountId}:log-group:/aws/codebuild/token-query-db-migrate:*"),
+          ],
+        }),
+      ],
+    });
+    dbMigrationLogsPolicy.attachToRole(dbMigrationCodeBuildRole);
+
+    const dbMigrationParametersPolicy = new iam.Policy(this, "DbMigrationCodeBuildParametersPolicy", {
+      statements: [
+        new iam.PolicyStatement({
+          actions: ["ssm:GetParameter", "ssm:GetParameters"],
+          resources: [Fn.sub("arn:${AWS::Partition}:ssm:${AWS::Region}:${AWS::AccountId}:parameter/token-query/foundation/*")],
+        }),
+      ],
+    });
+    dbMigrationParametersPolicy.attachToRole(dbMigrationCodeBuildRole);
+
+    const dbMigrationSecretsPolicy = new iam.Policy(this, "DbMigrationCodeBuildSecretsPolicy", {
+      statements: [
+        new iam.PolicyStatement({
+          actions: ["secretsmanager:GetSecretValue"],
+          resources: [dbCredentialsSecret.ref],
+        }),
+      ],
+    });
+    dbMigrationSecretsPolicy.attachToRole(dbMigrationCodeBuildRole);
+
+    const dbMigrationVpcPolicy = new iam.Policy(this, "DbMigrationCodeBuildVpcPolicy", {
+      statements: [
+        new iam.PolicyStatement({
+          actions: [
+            "ec2:CreateNetworkInterface",
+            "ec2:CreateNetworkInterfacePermission",
+            "ec2:DeleteNetworkInterface",
+            "ec2:DescribeDhcpOptions",
+            "ec2:DescribeNetworkInterfaces",
+            "ec2:DescribeSecurityGroups",
+            "ec2:DescribeSubnets",
+            "ec2:DescribeVpcs",
+          ],
+          resources: ["*"],
+        }),
+      ],
+    });
+    dbMigrationVpcPolicy.attachToRole(dbMigrationCodeBuildRole);
+
+    const dbMigrationCodeBuildProject = new codebuild.CfnProject(this, "DbMigrationCodeBuildProject", {
+      name: "token-query-db-migrate",
+      description: "Runs Token Query database migration commands inside the VPC.",
+      serviceRole: dbMigrationCodeBuildRole.roleArn,
+      source: {
+        type: "GITHUB",
+        location: "https://github.com/pws019/token-query.git",
+        buildSpec: "infra/codebuild/db-migrate-buildspec.yml",
+        gitCloneDepth: 1,
+      },
+      artifacts: {
+        type: "NO_ARTIFACTS",
+      },
+      environment: {
+        type: "LINUX_CONTAINER",
+        image: "aws/codebuild/amazonlinux-x86_64-standard:6.0",
+        computeType: "BUILD_GENERAL1_SMALL",
+        privilegedMode: false,
+        environmentVariables: [
+          {
+            name: "AWS_REGION",
+            type: "PLAINTEXT",
+            value: this.region,
+          },
+          {
+            name: "DB_CLUSTER_ENDPOINT",
+            type: "PLAINTEXT",
+            value: dbCluster.attrEndpointAddress,
+          },
+          {
+            name: "DB_CREDENTIALS_SECRET_ARN",
+            type: "PLAINTEXT",
+            value: dbCredentialsSecret.ref,
+          },
+        ],
+      },
+      vpcConfig: {
+        vpcId: vpc.ref,
+        subnets: privateSubnetIds,
+        securityGroupIds: [migrationSecurityGroup.attrGroupId],
+      },
+      logsConfig: {
+        cloudWatchLogs: {
+          status: "ENABLED",
+          groupName: "/aws/codebuild/token-query-db-migrate",
+        },
+      },
+      queuedTimeoutInMinutes: 30,
+      timeoutInMinutes: 30,
+      tags: nameTags("token-query-db-migrate"),
+    });
+    dbMigrationCodeBuildProject.node.addDependency(dbMigrationLogsPolicy);
+    dbMigrationCodeBuildProject.node.addDependency(dbMigrationParametersPolicy);
+    dbMigrationCodeBuildProject.node.addDependency(dbMigrationSecretsPolicy);
+    dbMigrationCodeBuildProject.node.addDependency(dbMigrationVpcPolicy);
+
     new ssm.StringParameter(this, "VpcIdParam", {
       parameterName: "/token-query/foundation/vpc-id",
       stringValue: vpc.ref,
@@ -417,6 +558,11 @@ export class FoundationStack extends Stack {
       stringValue: goSecurityGroup.attrGroupId,
     });
 
+    new ssm.StringParameter(this, "MigrationSecurityGroupIdParam", {
+      parameterName: "/token-query/foundation/migration-security-group-id",
+      stringValue: migrationSecurityGroup.attrGroupId,
+    });
+
     new ssm.StringParameter(this, "EcrRepositoryNameParam", {
       parameterName: "/token-query/foundation/ecr-repository-name",
       stringValue: goRepository.ref,
@@ -447,6 +593,11 @@ export class FoundationStack extends Stack {
       stringValue: goCodeBuildProject.ref,
     });
 
+    new ssm.StringParameter(this, "DbMigrationCodeBuildProjectNameParam", {
+      parameterName: "/token-query/foundation/db-migration-codebuild-project-name",
+      stringValue: dbMigrationCodeBuildProject.ref,
+    });
+
     new CfnOutput(this, "VpcId", {
       value: vpc.ref,
     });
@@ -475,6 +626,10 @@ export class FoundationStack extends Stack {
       value: goSecurityGroup.attrGroupId,
     });
 
+    new CfnOutput(this, "MigrationSecurityGroupId", {
+      value: migrationSecurityGroup.attrGroupId,
+    });
+
     new CfnOutput(this, "EcrRepositoryName", {
       value: goRepository.ref,
     });
@@ -497,6 +652,10 @@ export class FoundationStack extends Stack {
 
     new CfnOutput(this, "GoCodeBuildProjectName", {
       value: goCodeBuildProject.ref,
+    });
+
+    new CfnOutput(this, "DbMigrationCodeBuildProjectName", {
+      value: dbMigrationCodeBuildProject.ref,
     });
   }
 }

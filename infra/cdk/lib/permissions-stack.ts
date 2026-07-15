@@ -254,9 +254,12 @@ export class PermissionsStack extends Stack {
 
     deployRole.addToPolicy(
       new iam.PolicyStatement({
-        sid: "RunGoCodeBuildProject",
+        sid: "RunTokenQueryCodeBuildProjects",
         actions: ["codebuild:BatchGetBuilds", "codebuild:BatchGetProjects", "codebuild:StartBuild"],
-        resources: [`arn:${this.partition}:codebuild:${this.region}:${this.account}:project/token-query-go-build`],
+        resources: [
+          `arn:${this.partition}:codebuild:${this.region}:${this.account}:project/token-query-go-build`,
+          `arn:${this.partition}:codebuild:${this.region}:${this.account}:project/token-query-db-migrate`,
+        ],
       }),
     );
 

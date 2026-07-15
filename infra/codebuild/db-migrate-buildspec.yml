@@ -1,0 +1,33 @@
+version: 0.2
+
+env:
+  variables:
+    DB_MIGRATION_COMMAND: pnpm --filter @token-query/db db:migrate
+
+phases:
+  install:
+    commands:
+      - set -euo pipefail
+      - corepack enable
+      - corepack prepare pnpm@11.8.0 --activate
+      - pnpm install --frozen-lockfile
+  pre_build:
+    commands:
+      - set -euo pipefail
+      - test -n "$AWS_REGION"
+      - test -n "$DB_CLUSTER_ENDPOINT"
+      - test -n "$DB_CREDENTIALS_SECRET_ARN"
+      - test -n "$DB_MIGRATION_COMMAND"
+      - echo "Resolving database credentials..."
+      - secret_json="$(aws secretsmanager get-secret-value --secret-id "$DB_CREDENTIALS_SECRET_ARN" --region "$AWS_REGION" --query SecretString --output text)"
+      - db_user="$(node -e 'const secret = JSON.parse(process.argv[1]); process.stdout.write(secret.username || "postgres")' "$secret_json")"
+      - db_password="$(node -e 'const secret = JSON.parse(process.argv[1]); process.stdout.write(secret.password)' "$secret_json")"
+      - test -n "$db_user"
+      - test -n "$db_password"
+      - export DATABASE_URL="postgresql://${db_user}:${db_password}@${DB_CLUSTER_ENDPOINT}:5432/postgres?sslmode=require"
+      - echo "Database migration target resolved."
+  build:
+    commands:
+      - set -euo pipefail
+      - echo "Running database command: $DB_MIGRATION_COMMAND"
+      - eval "$DB_MIGRATION_COMMAND"

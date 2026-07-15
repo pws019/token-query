@@ -1,0 +1,142 @@
+name: Run DB Migration
+
+on:
+  workflow_dispatch:
+    inputs:
+      operation:
+        description: "Database operation to run."
+        required: true
+        default: migrate
+        type: choice
+        options:
+          - migrate
+          - reset_profiles
+      confirm_reset:
+        description: "Required for reset_profiles. Type clear-github-profiles."
+        required: false
+        type: string
+
+permissions:
+  contents: read
+  id-token: write
+
+concurrency:
+  group: db-migration-${{ inputs.operation }}
+  cancel-in-progress: false
+
+jobs:
+  run:
+    runs-on: ubuntu-latest
+    env:
+      AWS_REGION: ${{ vars.AWS_REGION || 'us-west-2' }}
+      CODEBUILD_PROJECT_NAME: ${{ vars.DB_MIGRATION_CODEBUILD_PROJECT_NAME || 'token-query-db-migrate' }}
+
+    steps:
+      - name: Resolve migration command
+        env:
+          OPERATION: ${{ inputs.operation }}
+          CONFIRM_RESET: ${{ inputs.confirm_reset || '' }}
+        run: |
+          set -euo pipefail
+
+          case "$OPERATION" in
+            migrate)
+              command="pnpm --filter @token-query/db db:migrate"
+              ;;
+            reset_profiles)
+              if [ "$CONFIRM_RESET" != "clear-github-profiles" ]; then
+                echo "::error::reset_profiles requires confirm_reset=clear-github-profiles."
+                exit 1
+              fi
+              command="pnpm --filter @token-query/db db:reset:profiles"
+              ;;
+            *)
+              echo "::error::Unsupported operation: $OPERATION"
+              exit 1
+              ;;
+          esac
+
+          {
+            echo "DB_MIGRATION_COMMAND=$command"
+            echo "DB_MIGRATION_OPERATION=$OPERATION"
+          } >> "$GITHUB_ENV"
+
+      - name: Checkout
+        uses: actions/checkout@v6
+
+      - name: Check migration settings
+        env:
+          AWS_DEPLOY_ROLE_ARN: ${{ secrets.AWS_DEPLOY_ROLE_ARN }}
+        run: |
+          set -euo pipefail
+
+          test -n "$AWS_REGION"
+          test -n "$AWS_DEPLOY_ROLE_ARN"
+          test -n "$CODEBUILD_PROJECT_NAME"
+          test -n "$DB_MIGRATION_COMMAND"
+
+      - name: Configure AWS credentials
+        uses: aws-actions/configure-aws-credentials@v6
+        with:
+          role-to-assume: ${{ secrets.AWS_DEPLOY_ROLE_ARN }}
+          aws-region: ${{ env.AWS_REGION }}
+
+      - name: Start DB migration CodeBuild
+        run: |
+          set -euo pipefail
+
+          build_id="$(
+            aws codebuild start-build \
+              --project-name "$CODEBUILD_PROJECT_NAME" \
+              --source-version "$GITHUB_SHA" \
+              --environment-variables-override \
+                name=DB_MIGRATION_COMMAND,value="$DB_MIGRATION_COMMAND",type=PLAINTEXT \
+              --query 'build.id' \
+              --output text
+          )"
+
+          test -n "$build_id"
+          echo "CODEBUILD_BUILD_ID=$build_id" >> "$GITHUB_ENV"
+          echo "Started DB migration build: $build_id"
+
+      - name: Wait for DB migration CodeBuild
+        run: |
+          set -euo pipefail
+
+          while true; do
+            read -r status log_url <<< "$(
+              aws codebuild batch-get-builds \
+                --ids "$CODEBUILD_BUILD_ID" \
+                --query 'builds[0].[buildStatus,logs.deepLink]' \
+                --output text
+            )"
+
+            echo "CodeBuild status: $status"
+
+            case "$status" in
+              SUCCEEDED)
+                echo "CodeBuild succeeded: $log_url"
+                echo "CODEBUILD_LOG_URL=$log_url" >> "$GITHUB_ENV"
+                break
+                ;;
+              FAILED|FAULT|STOPPED|TIMED_OUT)
+                echo "::error::CodeBuild failed with status $status. Logs: $log_url"
+                exit 1
+                ;;
+              *)
+                sleep 15
+                ;;
+            esac
+          done
+
+      - name: Write migration summary
+        if: always()
+        run: |
+          {
+            echo "## DB migration"
+            echo
+            echo "Operation: \`$DB_MIGRATION_OPERATION\`"
+            echo "CodeBuild project: \`$CODEBUILD_PROJECT_NAME\`"
+            echo "Build ID: \`${CODEBUILD_BUILD_ID:-not-started}\`"
+            echo "Logs: ${CODEBUILD_LOG_URL:-not-available}"
+          } >> "$GITHUB_STEP_SUMMARY"
