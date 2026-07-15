@@ -97,13 +97,17 @@ Responsibilities:
 - NAT Gateway.
 - Lambda security group.
 - Database security group.
+- Go service security group.
 - Aurora PostgreSQL.
+- ECR repository for the Go service image.
+- ECS cluster shared by production and preview Go services.
+- Cloud Map private DNS namespace shared by production and preview Go services.
 - Stable SSM parameters or CloudFormation outputs consumed by application
   stacks.
 
 This layer should change rarely. It is shared by the production API and PR
 preview APIs. Preview deployments should not create their own VPC, NAT Gateway,
-or database.
+database, ECR repository, ECS cluster, or Cloud Map namespace.
 
 Initial implementation:
 
@@ -113,6 +117,13 @@ Initial implementation:
 - One NAT Gateway shared by the private subnets.
 - `token-query-lambda-sg`.
 - `token-query-db-sg`, allowing PostgreSQL 5432 from the Lambda security group.
+- Planned: `token-query-go-sg`, allowing port 8080 from the Lambda security
+  group.
+- Planned: `token-query-db-sg` also allows PostgreSQL 5432 from
+  `token-query-go-sg`.
+- Planned: ECR repository `token-query-go`.
+- Planned: ECS cluster `token-query-cluster`.
+- Planned: Cloud Map private namespace `token-query.internal`.
 - Secrets Manager secret `token-query/db/master` for Aurora master credentials.
 - Aurora PostgreSQL Serverless v2 cluster `token-query-db`.
 - Aurora instance `token-query-db-instance-1`.
@@ -123,6 +134,12 @@ Initial implementation:
   - `/token-query/foundation/db-cluster-endpoint`
   - `/token-query/foundation/db-credentials-secret-arn`
   - `/token-query/foundation/db-security-group-id`
+  - Planned: `/token-query/foundation/go-security-group-id`
+  - Planned: `/token-query/foundation/ecr-repository-name`
+  - Planned: `/token-query/foundation/ecr-repository-uri`
+  - Planned: `/token-query/foundation/ecs-cluster-name`
+  - Planned: `/token-query/foundation/cloudmap-namespace-id`
+  - Planned: `/token-query/foundation/cloudmap-namespace-name`
 
 Deployment notes:
 
@@ -190,6 +207,45 @@ pnpm --filter @token-query/infra-cdk cdk diff token-query-api
 pnpm --filter @token-query/infra-cdk cdk deploy token-query-api
 ```
 
+### 3b. Go Application Layer
+
+Planned stack name:
+
+```text
+token-query-go
+```
+
+Responsibilities:
+
+- Production Go ECS task execution role.
+- Production Go ECS task role.
+- CloudWatch log group `/ecs/token-query-go`.
+- ECS task definition.
+- ECS service `token-query-go-service`.
+- Cloud Map service `go.token-query.internal`.
+- Runtime environment for the Go container, including `DATABASE_URL` and
+  `PORT=8080`.
+- Image tag parameter used to deploy a specific ECR image version.
+
+This layer reuses foundation resources:
+
+- ECR repository `token-query-go`.
+- ECS cluster `token-query-cluster`.
+- Private subnets.
+- Go security group.
+- Cloud Map namespace `token-query.internal`.
+- Aurora endpoint and credentials secret.
+
+The first version should support a manually supplied image tag:
+
+```bash
+pnpm --filter @token-query/infra-cdk cdk deploy token-query-go \
+  --parameters ImageTag=<short-sha-or-manual-tag>
+```
+
+After the stack is stable, CodeBuild should produce the image tag and GitHub
+Actions should deploy this stack with that tag.
+
 ### 4. Application Preview Layer
 
 Planned stack naming pattern:
@@ -222,7 +278,46 @@ production Lambda entrypoint checks whether it is running with `APP_ENV=prod`.
 If so, it attempts to invoke `token-query-pr-<preview-id>` with the original
 API Gateway event. If the preview function does not exist, the request falls
 back to the production handler. Preview Lambdas run with `APP_ENV=preview`, so
-they do not recursively route preview requests.
+  they do not recursively route preview requests.
+
+### 5. Go Application Preview Layer
+
+Planned stack naming pattern:
+
+```text
+token-query-preview-go-<preview-id>
+```
+
+Responsibilities:
+
+- PR-scoped ECS task definition revision.
+- PR-scoped ECS service `token-query-go-pr-<preview-id>`.
+- PR-scoped CloudWatch log group `/ecs/token-query-go-pr-<preview-id>`.
+- PR-scoped Cloud Map service `go-<preview-id>.token-query.internal`.
+- Image tag parameter, usually `<preview-id>-<short-sha>`.
+
+This layer should copy application runtime resources only. It reuses:
+
+- VPC.
+- Private subnets.
+- NAT gateway.
+- Aurora database.
+- ECR repository.
+- ECS cluster.
+- Cloud Map namespace.
+- Security groups.
+
+Preview Lambda should receive:
+
+```text
+GO_SERVICE_ORIGIN=http://go-<preview-id>.token-query.internal:8080
+```
+
+Production Lambda keeps:
+
+```text
+GO_SERVICE_ORIGIN=http://go.token-query.internal:8080
+```
 
 ## Implementation Order
 
@@ -240,17 +335,22 @@ they do not recursively route preview requests.
 12. Verify Lambda outbound access to GitHub through NAT.
 13. Implement the application preview layer.
 14. Add backend PR preview deployment and cleanup workflows.
-15. Add ECS/Fargate and Cloud Map for the future Go service.
-16. Gradually migrate backend logic from Lambda into the Go service.
+15. Add shared Go infrastructure to the foundation layer.
+16. Add `token-query-go` for the production ECS/Fargate Go service.
+17. Add CodeBuild for Go image build and ECR push.
+18. Add `token-query-preview-go-<preview-id>` for PR-scoped Go ECS services.
+19. Gradually migrate backend logic from Lambda into the Go service.
 
 ## Destroy Order
 
 Destroy stacks in the reverse order of their dependencies:
 
 1. `token-query-preview-api-*`
-2. `token-query-api`
-3. `token-query-foundation`
-4. `token-query-permissions`
+2. `token-query-preview-go-*`
+3. `token-query-go`
+4. `token-query-api`
+5. `token-query-foundation`
+6. `token-query-permissions`
 
 Preview stacks should be destroyed first because they are short-lived
 application resources that reuse the shared foundation layer. The main
@@ -267,6 +367,8 @@ Recommended manual sequence:
 
 ```bash
 pnpm --filter @token-query/infra-cdk cdk destroy token-query-preview-api-<preview-id>
+pnpm --filter @token-query/infra-cdk cdk destroy token-query-preview-go-<preview-id>
+pnpm --filter @token-query/infra-cdk cdk destroy token-query-go
 pnpm --filter @token-query/infra-cdk cdk destroy token-query-api
 pnpm --filter @token-query/infra-cdk cdk destroy token-query-foundation
 pnpm --filter @token-query/infra-cdk cdk destroy token-query-permissions

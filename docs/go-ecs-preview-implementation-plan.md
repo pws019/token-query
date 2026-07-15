@@ -346,55 +346,108 @@ curl https://api.doyouadoreme.online/api/profile/intro
 - Go 日志显示收到请求。
 - 返回个人介绍。
 
-## Phase 6：删除手动资源并归档到 CDK
+## Phase 6：删除手动资源并归档共享基础设施到 CDK
 
 目标：
 
-- 把手动创建的 ECR/ECS/ALB/Cloud Map/安全组规则归档到 CDK。
+- 把手动验证过的 Go 共享基础设施归档到 CDK。
 - 删除手动资源，避免双轨配置混乱。
 
-CDK 归档建议：
-
-新增或扩展 stack：
+Foundation layer 扩展范围：
 
 ```text
-token-query-api
-  -> production Lambda
-  -> production Go ECS service
-  -> Cloud Map service
-  -> optional ALB
-
-token-query-preview-api-<preview-id>
-  -> preview Lambda
-  -> preview Go ECS service
-  -> preview Cloud Map service
+token-query-foundation
+  -> ECR repository: token-query-go
+  -> ECS cluster: token-query-cluster
+  -> Cloud Map private namespace: token-query.internal
+  -> Go security group: token-query-go-sg
+  -> DB ingress from Go security group on 5432
+  -> Lambda-to-Go ingress on Go security group port 8080
+  -> SSM exports for cluster, namespace, ECR repository, and Go security group
 ```
 
-也可以在代码上拆分 construct：
+为什么 ECR 放 foundation：
 
-```text
-ApiStack
-  -> LambdaApiConstruct
-  -> GoServiceConstruct
-  -> CloudMapWiringConstruct
-```
+- ECR repository 建好后很少变。
+- Production 和 preview 都推同一个 repository，不应该每个 PR 复制。
+- 删除 preview ECS service 时不能删除 repository，否则会影响其他环境。
 
-但 stack 名称仍保持 `api` / `api-preview`，因为对外它们都是后端。
+本阶段不创建 ECS Service：
+
+- Foundation 只提供共享底座。
+- 生产 Go service 放下一阶段 `token-query-go`。
+- Preview Go service 放后续 `token-query-preview-go-<preview-id>`。
 
 验收方式：
 
 ```bash
-pnpm --filter @token-query/infra-cdk cdk diff token-query-api
-pnpm --filter @token-query/infra-cdk cdk deploy token-query-api
+pnpm --filter @token-query/infra-cdk cdk diff token-query-foundation
+pnpm --filter @token-query/infra-cdk cdk deploy token-query-foundation
+```
+
+部署后确认：
+
+- ECR 中存在 `token-query-go`。
+- ECS 中存在 `token-query-cluster`。
+- Cloud Map 中存在 private namespace `token-query.internal`。
+- Security group 中存在 `token-query-go-sg`。
+- `token-query-db-sg` 允许 `token-query-go-sg` 访问 PostgreSQL 5432。
+- `token-query-go-sg` 允许 `token-query-lambda-sg` 访问 8080。
+
+## Phase 7：新增正式 Go CDK Stack
+
+目标：
+
+- 用 CDK 部署正式 Go ECS/Fargate service。
+- 先支持传入 image tag 部署，再把 image tag 的生产过程交给 CodeBuild。
+
+新增 stack：
+
+```text
+token-query-go
+  -> task execution role
+  -> task role
+  -> CloudWatch log group: /ecs/token-query-go
+  -> ECS task definition
+  -> ECS service: token-query-go-service
+  -> Cloud Map service: go.token-query.internal
+  -> ImageTag parameter
+  -> DATABASE_URL env from existing Aurora endpoint + Secrets Manager dynamic reference
+```
+
+生产 Go 服务关系：
+
+```text
+ECS Service
+  -> desiredCount=1
+  -> runs Task Definition
+  -> pulls image from ECR token-query-go:<image-tag>
+  -> registers into Cloud Map as go.token-query.internal
+```
+
+部署方式：
+
+```bash
+pnpm --filter @token-query/infra-cdk cdk deploy token-query-go \
+  --parameters ImageTag=<short-sha-or-manual-tag>
+```
+
+验收方式：
+
+```bash
+curl -X POST https://app.doyouadoreme.online/api/github/profile/intro \
+  -H "Content-Type: application/json" \
+  -d '{"githubId":15248275}'
 ```
 
 部署后确认：
 
 - ECS service 由 CDK 管理。
-- Lambda env 中有 Go service discovery 地址。
-- `/api/profile/intro` 可用。
+- Cloud Map service `go.token-query.internal` 有 ECS task instance。
+- Lambda env `GO_SERVICE_ORIGIN=http://go.token-query.internal:8080`。
+- `Cloudflare Worker -> Lambda -> Go -> DB` 可用。
 
-## Phase 7：接入 CodeBuild 构建 Go 镜像
+## Phase 8：接入 CodeBuild 构建 Go 镜像
 
 目标：
 
@@ -409,10 +462,10 @@ GitHub Actions
   -> start CodeBuild
 
 CodeBuild
-  -> checkout source
+  -> receive source version / repository source
   -> go test
-  -> docker build
-  -> docker push ECR
+  -> docker build apps/go-service
+  -> docker push ECR token-query-go:<image-tag>
   -> 输出 image tag
 
 GitHub Actions / CDK
@@ -446,12 +499,63 @@ CodeBuild IAM 需要关注：
 - ECR 中能看到对应 tag。
 - ECS service 能使用这个 tag 部署。
 
-## Phase 8：接入 PR Preview 后端 Go 资源
+建议正式 Go 发布流程：
+
+```text
+GitHub Actions
+  -> assume AWS deploy role
+  -> start CodeBuild project
+      -> push ECR: token-query-go:<short-sha>
+  -> cdk deploy token-query-go
+      -> ImageTag=<short-sha>
+```
+
+建议 Preview Go 发布流程：
+
+```text
+GitHub Actions PR
+  -> start CodeBuild project
+      -> push ECR: token-query-go:<preview-id>-<short-sha>
+  -> cdk deploy token-query-preview-go-<preview-id>
+      -> PreviewId=<preview-id>
+      -> ImageTag=<preview-id>-<short-sha>
+```
+
+## Phase 9：接入 PR Preview 后端 Go 资源
 
 目标：
 
 - 后端 PR preview 从“只创建 Lambda”升级为“创建 Lambda + Go ECS service”。
 - 前端 preview 不需要知道 Go 存在，仍然只请求 Lambda。
+
+新增 stack：
+
+```text
+token-query-preview-go-<preview-id>
+  -> preview task definition
+  -> preview ECS service: token-query-go-pr-<preview-id>
+  -> preview CloudWatch log group: /ecs/token-query-go-pr-<preview-id>
+  -> preview Cloud Map service: go-<preview-id>.token-query.internal
+  -> ImageTag parameter
+```
+
+Preview 复制范围：
+
+- 复制 ECS service。
+- 复制 task definition revision。
+- 复制 log group。
+- 复制 Cloud Map service。
+
+Preview 共用范围：
+
+- VPC。
+- Private subnets。
+- NAT。
+- RDS。
+- ECS cluster。
+- ECR repository。
+- Cloud Map namespace。
+- Security groups。
 
 Preview 资源命名：
 
@@ -474,7 +578,10 @@ Docker image tag:
   feat-123-<short-sha>
 
 Cloud Map service:
-  go-pr-feat-123
+  go-feat-123
+
+Cloud Map DNS:
+  go-feat-123.token-query.internal
 ```
 
 Preview 触发规则：
@@ -505,7 +612,7 @@ curl https://<preview-id>.app.doyouadoreme.online/api/profile/intro
 - Lambda 日志包含 preview id。
 - Go ECS service 日志包含请求记录。
 
-## Phase 9：清理与文档化
+## Phase 10：清理与文档化
 
 目标：
 
@@ -548,6 +655,7 @@ curl https://<preview-id>.app.doyouadoreme.online/api/profile/intro
 7. 手动创建 ECR/ECS/Fargate，部署 Go image。
 8. 建 Cloud Map，并让 Lambda 调 Go。
 9. 跑通 `前端 -> Lambda -> Go -> DB -> 前端`。
-10. 删除手动资源，将 ECR/ECS/Cloud Map/安全组规则归档到 CDK。
-11. 引入 CodeBuild 构建 Go image。
-12. 扩展 Lambda/Go Preview Stack，完成 PR 级 Go preview。
+10. 删除手动资源，将 ECR/ECS Cluster/Cloud Map namespace/安全组规则归档到 foundation。
+11. 新增 `token-query-go`，用手动 image tag 部署正式 Go ECS service。
+12. 引入 CodeBuild 构建 Go image。
+13. 扩展 Lambda/Go Preview Stack，完成 PR 级 Go preview。
