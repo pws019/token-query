@@ -21,6 +21,12 @@ on:
       - "infra/cdk/**"
       - ".github/workflows/deploy-lambda-preview.yml"
       - "docs/pr-preview-naming.md"
+  workflow_dispatch:
+    inputs:
+      preview_id:
+        description: "Preview ID to deploy, for example feat-001."
+        required: true
+        type: string
 
 permissions:
   contents: read
@@ -29,7 +35,7 @@ permissions:
   pull-requests: write
 
 concurrency:
-  group: lambda-preview-${{ github.event.pull_request.number }}
+  group: lambda-preview-${{ github.event.pull_request.number || inputs.preview_id }}
   cancel-in-progress: true
 
 jobs:
@@ -40,49 +46,63 @@ jobs:
       PREVIEW_BASE_DOMAIN: ${{ vars.PREVIEW_BASE_DOMAIN || 'app.doyouadoreme.online' }}
 
     steps:
-      - name: Validate PR preview naming
+      - name: Resolve preview names
         id: preview
         env:
+          EVENT_NAME: ${{ github.event_name }}
           BRANCH_NAME: ${{ github.head_ref }}
           PR_TITLE: ${{ github.event.pull_request.title }}
-          COMMIT_SHA: ${{ github.event.pull_request.head.sha }}
+          COMMIT_SHA: ${{ github.event.pull_request.head.sha || github.sha }}
+          INPUT_PREVIEW_ID: ${{ inputs.preview_id }}
         run: |
           set -euo pipefail
 
+          preview_id_regex='^(bug|feat|fix|chore|hotfix)-[0-9]+$'
           branch_regex='^(bug|feat|fix|chore|hotfix)/((bug|feat|fix|chore|hotfix)-[0-9]+)-[a-z0-9-]+$'
           title_regex='^((bug|feat|fix|chore|hotfix)-[0-9]+):'
 
-          if [[ ! "$BRANCH_NAME" =~ $branch_regex ]]; then
-            echo "::error::Branch name must match <type>/<preview-id>-<short-description>, for example bug/bug-111-login-token-expiry."
-            exit 1
+          if [ "$EVENT_NAME" = "workflow_dispatch" ]; then
+            preview_id="$INPUT_PREVIEW_ID"
+
+            if [[ ! "$preview_id" =~ $preview_id_regex ]]; then
+              echo "::error::preview_id must match <type>-<number>, for example feat-001."
+              exit 1
+            fi
+          else
+            if [[ ! "$BRANCH_NAME" =~ $branch_regex ]]; then
+              echo "::error::Branch name must match <type>/<preview-id>-<short-description>, for example bug/bug-111-login-token-expiry."
+              exit 1
+            fi
+
+            branch_preview_id="${BASH_REMATCH[2]}"
+
+            if [[ ! "$PR_TITLE" =~ $title_regex ]]; then
+              echo "::error::PR title must start with <preview-id>:, for example bug-111: 修复登录 token 过期问题."
+              exit 1
+            fi
+
+            title_preview_id="${BASH_REMATCH[1]}"
+
+            if [[ "$branch_preview_id" != "$title_preview_id" ]]; then
+              echo "::error::Preview ID mismatch. Branch uses '$branch_preview_id' but PR title uses '$title_preview_id'."
+              exit 1
+            fi
+
+            preview_id="$branch_preview_id"
           fi
 
-          branch_preview_id="${BASH_REMATCH[2]}"
-
-          if [[ ! "$PR_TITLE" =~ $title_regex ]]; then
-            echo "::error::PR title must start with <preview-id>:, for example bug-111: 修复登录 token 过期问题."
-            exit 1
-          fi
-
-          title_preview_id="${BASH_REMATCH[1]}"
-
-          if [[ "$branch_preview_id" != "$title_preview_id" ]]; then
-            echo "::error::Preview ID mismatch. Branch uses '$branch_preview_id' but PR title uses '$title_preview_id'."
-            exit 1
-          fi
-
-          if (( ${#branch_preview_id} > 40 )); then
+          if (( ${#preview_id} > 40 )); then
             echo "::error::Preview ID is too long. Keep it at 40 characters or fewer."
             exit 1
           fi
 
-          stack_name="token-query-preview-api-$branch_preview_id"
-          function_name="token-query-pr-$branch_preview_id"
-          preview_domain="$branch_preview_id.$PREVIEW_BASE_DOMAIN"
+          stack_name="token-query-preview-api-$preview_id"
+          function_name="token-query-pr-$preview_id"
+          preview_domain="$preview_id.$PREVIEW_BASE_DOMAIN"
           short_sha="${COMMIT_SHA:0:7}"
 
           {
-            echo "preview_id=$branch_preview_id"
+            echo "preview_id=$preview_id"
             echo "stack_name=$stack_name"
             echo "function_name=$function_name"
             echo "preview_domain=$preview_domain"
@@ -90,7 +110,7 @@ jobs:
           } >> "$GITHUB_OUTPUT"
 
           {
-            echo "PREVIEW_ID=$branch_preview_id"
+            echo "PREVIEW_ID=$preview_id"
             echo "STACK_NAME=$stack_name"
             echo "FUNCTION_NAME=$function_name"
             echo "PREVIEW_DOMAIN=$preview_domain"
