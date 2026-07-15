@@ -9,6 +9,7 @@ import {
   KeyRound,
   LoaderCircle,
   ShieldCheck,
+  Sparkles,
   Trash2,
   UserRound,
   Users,
@@ -33,6 +34,7 @@ type GithubProfile = {
 };
 
 const queryFailedError = "GitHub information query failed. Please check your token.";
+const introFailedError = "Self introduction generation failed. Please try again.";
 
 export function meta({}: Route.MetaArgs) {
   return [
@@ -46,12 +48,17 @@ export default function Profile() {
   const [profile, setProfile] = useState<GithubProfile | null>(null);
   const [error, setError] = useState("");
   const [message, setMessage] = useState("");
+  const [intro, setIntro] = useState("");
+  const [introError, setIntroError] = useState("");
   const [isQuerying, setIsQuerying] = useState(false);
   const [isDeleting, setIsDeleting] = useState(false);
+  const [isGeneratingIntro, setIsGeneratingIntro] = useState(false);
 
   async function queryProfile() {
     setError("");
     setMessage("");
+    setIntro("");
+    setIntroError("");
     setIsQuerying(true);
 
     try {
@@ -80,6 +87,8 @@ export default function Profile() {
   async function deleteProfile() {
     setError("");
     setMessage("");
+    setIntro("");
+    setIntroError("");
     setIsDeleting(true);
 
     try {
@@ -101,7 +110,38 @@ export default function Profile() {
     }
   }
 
-  const isBusy = isQuerying || isDeleting;
+  async function generateIntro() {
+    if (!profile) {
+      return;
+    }
+
+    setIntro("");
+    setIntroError("");
+    setIsGeneratingIntro(true);
+
+    try {
+      const response = await fetch("/api/github/profile/intro", {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify({ githubId: profile.githubId }),
+      });
+      const result = await response.json();
+
+      if (!response.ok || typeof result.intro !== "string") {
+        throw new Error(result.error || introFailedError);
+      }
+
+      setIntro(result.intro);
+    } catch (err) {
+      setIntroError(err instanceof Error ? err.message : introFailedError);
+    } finally {
+      setIsGeneratingIntro(false);
+    }
+  }
+
+  const isBusy = isQuerying || isDeleting || isGeneratingIntro;
 
   return (
     <div className="flex h-svh flex-col">
@@ -189,7 +229,15 @@ export default function Profile() {
           </div>
 
           {profile ? (
-            <ProfileCard profile={profile} />
+            <>
+              <ProfileCard profile={profile} />
+              <IntroPanel
+                intro={intro}
+                error={introError}
+                isGenerating={isGeneratingIntro}
+                onGenerate={generateIntro}
+              />
+            </>
           ) : (
             <StatePanel
               icon={<UserRound className="size-5" />}
@@ -230,6 +278,68 @@ export default function Profile() {
         </aside>
       </div>
       </main>
+    </div>
+  );
+}
+
+function IntroPanel({
+  intro,
+  error,
+  isGenerating,
+  onGenerate,
+}: {
+  intro: string;
+  error: string;
+  isGenerating: boolean;
+  onGenerate: () => void;
+}) {
+  return (
+    <div className="rounded-2xl border border-[#c1c6d7] bg-white p-5 sm:p-6">
+      <div className="flex flex-col gap-4 sm:flex-row sm:items-start sm:justify-between">
+        <div className="min-w-0">
+          <div className="flex items-center gap-3">
+            <div className="flex size-10 shrink-0 items-center justify-center rounded-xl bg-[#d8e2ff] text-[#0058bc]">
+              <Sparkles className="size-5" />
+            </div>
+            <div>
+              <h2 className="text-[16px] font-semibold leading-[22px] text-[#181c23]">
+                自我介绍
+              </h2>
+              <p className="mt-1 text-[13px] leading-[18px] text-[#5d5e63]">
+                根据当前账户资料生成一句简短介绍。
+              </p>
+            </div>
+          </div>
+        </div>
+
+        <Button
+          disabled={isGenerating}
+          className="h-11 shrink-0 rounded-xl bg-[#0058bc] px-4 text-[13px] font-medium leading-[18px] text-white transition-all hover:bg-[#0070eb] active:scale-[0.98]"
+          onClick={onGenerate}
+        >
+          {isGenerating ? (
+            <>
+              <LoaderCircle className="size-4 animate-spin" />
+              生成中...
+            </>
+          ) : (
+            "生成自我介绍"
+          )}
+        </Button>
+      </div>
+
+      {error && (
+        <div className="mt-4 rounded-xl border border-[#ffdad6] bg-[#fff3f1] px-4 py-3 text-[13px] font-medium leading-[18px] text-[#93000a]">
+          {error}
+        </div>
+      )}
+
+      {intro && (
+        <div className="mt-4 rounded-xl border border-[#c1c6d7]/70 bg-[#f1f3fe] px-4 py-3 text-[13px] font-medium leading-[18px] text-[#0058bc]">
+          <span className="font-semibold">查询成功：</span>
+          {intro}
+        </div>
+      )}
     </div>
   );
 }

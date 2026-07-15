@@ -1,4 +1,5 @@
 import { Hono } from "hono";
+import { z } from "zod";
 
 import {
   deleteGithubProfiles,
@@ -12,6 +13,11 @@ const queryFailedError = "GitHub information query failed. Please check your tok
 const invalidRequestError = "Invalid request payload.";
 const databaseFailedError = "Profile saved failed. Please check database configuration.";
 const deleteFailedError = "Delete failed. Please try again.";
+const introFailedError = "Invalid intro request payload.";
+
+const githubProfileIntroRequestSchema = z.object({
+  githubId: z.number().int().positive(),
+});
 
 export const githubRoutes = new Hono();
 
@@ -46,6 +52,21 @@ githubRoutes.post("/profile", async (c) => {
     });
     return c.json({ code: "unexpected_error", error: queryFailedError }, 500);
   }
+});
+
+githubRoutes.post("/profile/intro", async (c) => {
+  const parseResult = githubProfileIntroRequestSchema.safeParse(await c.req.json());
+  if (!parseResult.success) {
+    console.warn("github_profile_intro_invalid_request", {
+      issues: parseResult.error.issues.map((issue) => issue.path.join(".")),
+    });
+    return c.json({ code: "invalid_request", error: introFailedError }, 400);
+  }
+
+  return c.json({
+    githubId: parseResult.data.githubId,
+    intro: "mock-user你是个好人呀",
+  });
 });
 
 githubRoutes.delete("/profile", async (c) => {
