@@ -47,8 +47,18 @@ Responsibilities:
 - GitHub Actions OIDC provider.
 - GitHub Actions deploy role.
 - IAM policies needed by deployment workflows.
-- Permissions that allow application stacks to create their own runtime roles
-  for Lambda, CodeBuild, ECS task execution, and ECS tasks.
+- Permissions that allow application stacks to create their own runtime roles.
+
+Principle:
+
+- Keep this layer limited to permissions that must exist before other stacks can
+  deploy, such as the GitHub OIDC deploy entry point.
+- Runtime roles should be created by the stack that owns the resource whenever
+  possible. Lambda execution roles belong in the Lambda/API stack, ECS task
+  roles belong in the Go stack, and CodeBuild service roles belong in the
+  CodeBuild stack.
+- Do not pre-create resource-specific roles here unless there is a concrete
+  cross-stack reason.
 
 Initial implementation:
 
@@ -117,13 +127,11 @@ Initial implementation:
 - One NAT Gateway shared by the private subnets.
 - `token-query-lambda-sg`.
 - `token-query-db-sg`, allowing PostgreSQL 5432 from the Lambda security group.
-- Planned: `token-query-go-sg`, allowing port 8080 from the Lambda security
-  group.
-- Planned: `token-query-db-sg` also allows PostgreSQL 5432 from
-  `token-query-go-sg`.
-- Planned: ECR repository `token-query-go`.
-- Planned: ECS cluster `token-query-cluster`.
-- Planned: Cloud Map private namespace `token-query.internal`.
+- `token-query-go-sg`, allowing port 8080 from the Lambda security group.
+- `token-query-db-sg` also allows PostgreSQL 5432 from `token-query-go-sg`.
+- ECR repository `token-query-go`.
+- ECS cluster `token-query-cluster`.
+- Cloud Map private namespace `token-query.internal`.
 - Secrets Manager secret `token-query/db/master` for Aurora master credentials.
 - Aurora PostgreSQL Serverless v2 cluster `token-query-db`.
 - Aurora instance `token-query-db-instance-1`.
@@ -134,12 +142,12 @@ Initial implementation:
   - `/token-query/foundation/db-cluster-endpoint`
   - `/token-query/foundation/db-credentials-secret-arn`
   - `/token-query/foundation/db-security-group-id`
-  - Planned: `/token-query/foundation/go-security-group-id`
-  - Planned: `/token-query/foundation/ecr-repository-name`
-  - Planned: `/token-query/foundation/ecr-repository-uri`
-  - Planned: `/token-query/foundation/ecs-cluster-name`
-  - Planned: `/token-query/foundation/cloudmap-namespace-id`
-  - Planned: `/token-query/foundation/cloudmap-namespace-name`
+  - `/token-query/foundation/go-security-group-id`
+  - `/token-query/foundation/ecr-repository-name`
+  - `/token-query/foundation/ecr-repository-uri`
+  - `/token-query/foundation/ecs-cluster-name`
+  - `/token-query/foundation/cloudmap-namespace-id`
+  - `/token-query/foundation/cloudmap-namespace-name`
 
 Deployment notes:
 
