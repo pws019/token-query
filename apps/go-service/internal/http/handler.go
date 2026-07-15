@@ -59,6 +59,13 @@ func (h *Handler) generateIntro(w http.ResponseWriter, r *http.Request) {
 			})
 			return
 		}
+		if errors.Is(err, profile.ErrProfileNotFound) {
+			writeJSON(w, http.StatusNotFound, map[string]any{
+				"code":  "profile_not_found",
+				"error": "GitHub profile was not found.",
+			})
+			return
+		}
 
 		log.Printf("profile_intro_failed githubId=%d err=%v", request.GithubID, err)
 		writeJSON(w, http.StatusInternalServerError, map[string]any{

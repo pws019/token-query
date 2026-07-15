@@ -4,15 +4,39 @@ import { defineConfig } from "vite";
 
 export default defineConfig({
   cacheDir: "node_modules/.vite",
-  plugins: [tailwindcss(), reactRouter()],
+  plugins: [
+    {
+      name: "ignore-chrome-devtools-probe",
+      apply: "serve",
+      configureServer(server) {
+        server.middlewares.use((req, res, next) => {
+          if (req.url === "/.well-known/appspecific/com.chrome.devtools.json") {
+            res.statusCode = 204;
+            res.end();
+            return;
+          }
+
+          next();
+        });
+      },
+    },
+    tailwindcss(),
+    reactRouter(),
+  ],
   resolve: {
     tsconfigPaths: true,
   },
   ssr: {
-    noExternal: true,
+    noExternal: ["@token-query/api", "@token-query/env", "@token-query/ui"],
     target: "webworker",
   },
   server: {
+    proxy: {
+      "/api": {
+        target: process.env.WEB_API_PROXY_ORIGIN ?? "http://localhost:3000",
+        changeOrigin: true,
+      },
+    },
     watch: {
       usePolling: true,
       interval: 250,

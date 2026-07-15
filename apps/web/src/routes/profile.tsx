@@ -230,13 +230,13 @@ export default function Profile() {
 
           {profile ? (
             <>
-              <ProfileCard profile={profile} />
               <IntroPanel
                 intro={intro}
                 error={introError}
                 isGenerating={isGeneratingIntro}
                 onGenerate={generateIntro}
               />
+              <ProfileCard profile={profile} />
             </>
           ) : (
             <StatePanel

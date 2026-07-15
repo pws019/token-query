@@ -9,7 +9,8 @@ GET /health
 POST /profile/intro
 ```
 
-Run locally after Go is installed:
+Run locally after Go is installed. The service reads `DATABASE_URL`; when it is
+not set, local dev falls back to `postgresql://postgres:password@localhost:5432/postgres`.
 
 ```bash
 cd apps/go-service
@@ -25,13 +26,14 @@ curl -X POST http://localhost:8080/profile/intro \
   -d '{"githubId":123}'
 ```
 
-Expected mock response:
+Expected response after a GitHub profile has already been saved by the Lambda
+layer:
 
 ```json
 {
   "githubId": 123,
-  "login": "mock-user",
-  "intro": "mock-user你是个好人呀"
+  "login": "your-login",
+  "intro": "your-login你是个好人呀"
 }
 ```
 
