@@ -1,0 +1,9 @@
+{
+  "name": "go-service",
+  "private": true,
+  "scripts": {
+    "build": "GOCACHE=/tmp/token-query-go-build-cache go build ./cmd/server",
+    "check-types": "GOCACHE=/tmp/token-query-go-build-cache go test ./...",
+    "dev": "GOCACHE=/tmp/token-query-go-build-cache DATABASE_URL=${DATABASE_URL:-postgresql://postgres:password@localhost:5432/postgres} PORT=${PORT:-8080} go run ./cmd/server"
+  }
+}

@@ -1,4 +1,5 @@
 import { Hono } from "hono";
+import { z } from "zod";
 
 import {
   deleteGithubProfiles,
@@ -6,12 +7,19 @@ import {
   githubProfileRequestSchema,
   queryAndSaveGithubProfile,
 } from "../services/github-profile";
+import { generateProfileIntro, GoProfileIntroError } from "../services/go-profile-intro";
 import { serializeError } from "../utils/error-log";
 
 const queryFailedError = "GitHub information query failed. Please check your token.";
 const invalidRequestError = "Invalid request payload.";
 const databaseFailedError = "Profile saved failed. Please check database configuration.";
 const deleteFailedError = "Delete failed. Please try again.";
+const introFailedError = "Invalid intro request payload.";
+const introServiceFailedError = "Self introduction generation failed. Please try again.";
+
+const githubProfileIntroRequestSchema = z.object({
+  githubId: z.number().int().positive(),
+});
 
 export const githubRoutes = new Hono();
 
@@ -45,6 +53,35 @@ githubRoutes.post("/profile", async (c) => {
       cause: serializeError(error),
     });
     return c.json({ code: "unexpected_error", error: queryFailedError }, 500);
+  }
+});
+
+githubRoutes.post("/profile/intro", async (c) => {
+  try {
+    const parseResult = githubProfileIntroRequestSchema.safeParse(await c.req.json());
+    if (!parseResult.success) {
+      console.warn("github_profile_intro_invalid_request", {
+        issues: parseResult.error.issues.map((issue) => issue.path.join(".")),
+      });
+      return c.json({ code: "invalid_request", error: introFailedError }, 400);
+    }
+
+    const intro = await generateProfileIntro(parseResult.data.githubId);
+    return c.json(intro);
+  } catch (error) {
+    if (error instanceof GoProfileIntroError) {
+      console.error("github_profile_intro_go_service_failed", {
+        code: error.code,
+        status: error.status,
+        cause: serializeError(error.cause),
+      });
+      return c.json({ code: error.code, error: introServiceFailedError }, 502);
+    }
+
+    console.error("github_profile_intro_unexpected_error", {
+      cause: serializeError(error),
+    });
+    return c.json({ code: "unexpected_error", error: introServiceFailedError }, 500);
   }
 });
 

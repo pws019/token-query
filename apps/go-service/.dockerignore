@@ -1,0 +1,7 @@
+.git
+.DS_Store
+tmp
+dist
+build
+coverage
+*.log
