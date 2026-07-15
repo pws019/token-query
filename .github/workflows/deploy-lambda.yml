@@ -1,4 +1,4 @@
-name: Deploy API
+name: Deploy Lambda
 
 on:
   push:
@@ -7,13 +7,15 @@ on:
       - main-v2
     paths:
       - "apps/server/**"
-      - "packages/**"
+      - "packages/api/**"
+      - "packages/db/**"
+      - "packages/env/**"
       - "package.json"
       - "pnpm-lock.yaml"
       - "pnpm-workspace.yaml"
       - "turbo.json"
       - "infra/cdk/**"
-      - ".github/workflows/deploy-api.yml"
+      - ".github/workflows/deploy-lambda.yml"
   workflow_dispatch:
 
 permissions:
@@ -21,7 +23,7 @@ permissions:
   id-token: write
 
 concurrency:
-  group: api-prod
+  group: lambda-prod
   cancel-in-progress: false
 
 jobs:
