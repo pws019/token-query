@@ -24,7 +24,7 @@ phases:
       - db_password="$(node -e 'const secret = JSON.parse(process.argv[1]); process.stdout.write(secret.password)' "$secret_json")"
       - test -n "$db_user"
       - test -n "$db_password"
-      - export DATABASE_URL="postgresql://${db_user}:${db_password}@${DB_CLUSTER_ENDPOINT}:5432/postgres?sslmode=require"
+      - export DATABASE_URL="postgresql://${db_user}:${db_password}@${DB_CLUSTER_ENDPOINT}:5432/postgres?sslmode=require&uselibpqcompat=true"
       - echo "Database migration target resolved."
   build:
     commands:
