@@ -1,0 +1,32 @@
+version: 0.2
+
+env:
+  variables:
+    IMAGE_TAG: manual-codebuild
+
+phases:
+  pre_build:
+    commands:
+      - set -euo pipefail
+      - test -n "$AWS_REGION"
+      - test -n "$ECR_REPOSITORY"
+      - test -n "$ECR_REPOSITORY_URI"
+      - test -n "$IMAGE_TAG"
+      - echo "Logging in to Amazon ECR..."
+      - aws ecr get-login-password --region "$AWS_REGION" | docker login --username AWS --password-stdin "${ECR_REPOSITORY_URI%/*}"
+  build:
+    commands:
+      - set -euo pipefail
+      - echo "Running Go tests..."
+      - cd apps/go-service
+      - go test ./...
+      - cd ../..
+      - echo "Building Go service image $ECR_REPOSITORY_URI:$IMAGE_TAG..."
+      - docker build -t "$ECR_REPOSITORY:$IMAGE_TAG" ./apps/go-service
+      - docker tag "$ECR_REPOSITORY:$IMAGE_TAG" "$ECR_REPOSITORY_URI:$IMAGE_TAG"
+  post_build:
+    commands:
+      - set -euo pipefail
+      - echo "Pushing Go service image $ECR_REPOSITORY_URI:$IMAGE_TAG..."
+      - docker push "$ECR_REPOSITORY_URI:$IMAGE_TAG"
+      - echo "Pushed $ECR_REPOSITORY_URI:$IMAGE_TAG"

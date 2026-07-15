@@ -4,6 +4,7 @@ import (
 	"context"
 	"log"
 	"net/http"
+	"net/url"
 	"os"
 	"time"
 
@@ -14,7 +15,7 @@ import (
 
 func main() {
 	port := getenv("PORT", "8080")
-	databaseURL := getenv("DATABASE_URL", "postgresql://postgres:password@localhost:5432/postgres")
+	databaseURL := databaseURLFromEnv()
 
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 	defer cancel()
@@ -47,4 +48,31 @@ func getenv(key string, fallback string) string {
 		return fallback
 	}
 	return value
+}
+
+func databaseURLFromEnv() string {
+	if databaseURL := os.Getenv("DATABASE_URL"); databaseURL != "" {
+		return databaseURL
+	}
+
+	host := os.Getenv("DATABASE_HOST")
+	password := os.Getenv("DATABASE_PASSWORD")
+	if host == "" || password == "" {
+		return "postgresql://postgres:password@localhost:5432/postgres"
+	}
+
+	user := getenv("DATABASE_USER", "postgres")
+	port := getenv("DATABASE_PORT", "5432")
+	name := getenv("DATABASE_NAME", "postgres")
+
+	values := url.Values{}
+	values.Set("sslmode", getenv("DATABASE_SSLMODE", "require"))
+
+	return (&url.URL{
+		Scheme:   "postgresql",
+		User:     url.UserPassword(user, password),
+		Host:     host + ":" + port,
+		Path:     name,
+		RawQuery: values.Encode(),
+	}).String()
 }

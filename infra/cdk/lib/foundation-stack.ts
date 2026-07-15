@@ -1,5 +1,15 @@
 import { CfnOutput, Fn, Stack, type StackProps } from "aws-cdk-lib";
-import { aws_ec2 as ec2, aws_rds as rds, aws_secretsmanager as secretsmanager, aws_ssm as ssm } from "aws-cdk-lib";
+import {
+  aws_codebuild as codebuild,
+  aws_ec2 as ec2,
+  aws_ecr as ecr,
+  aws_ecs as ecs,
+  aws_iam as iam,
+  aws_rds as rds,
+  aws_secretsmanager as secretsmanager,
+  aws_servicediscovery as servicediscovery,
+  aws_ssm as ssm,
+} from "aws-cdk-lib";
 import type { Construct } from "constructs";
 
 export class FoundationStack extends Stack {
@@ -144,6 +154,20 @@ export class FoundationStack extends Stack {
       tags: nameTags("token-query-db-sg"),
     });
 
+    const goSecurityGroup = new ec2.CfnSecurityGroup(this, "GoSecurityGroup", {
+      groupDescription: "Security group for Token Query Go services on ECS/Fargate.",
+      groupName: "token-query-go-sg",
+      vpcId: vpc.ref,
+      securityGroupEgress: [
+        {
+          cidrIp: "0.0.0.0/0",
+          ipProtocol: "-1",
+          description: "Allow all outbound traffic.",
+        },
+      ],
+      tags: nameTags("token-query-go-sg"),
+    });
+
     new ec2.CfnSecurityGroupIngress(this, "DbIngressFromLambda", {
       groupId: dbSecurityGroup.attrGroupId,
       sourceSecurityGroupId: lambdaSecurityGroup.attrGroupId,
@@ -153,7 +177,154 @@ export class FoundationStack extends Stack {
       description: "PostgreSQL from Token Query Lambda functions.",
     });
 
+    new ec2.CfnSecurityGroupIngress(this, "DbIngressFromGo", {
+      groupId: dbSecurityGroup.attrGroupId,
+      sourceSecurityGroupId: goSecurityGroup.attrGroupId,
+      ipProtocol: "tcp",
+      fromPort: 5432,
+      toPort: 5432,
+      description: "PostgreSQL from Token Query Go services.",
+    });
+
+    new ec2.CfnSecurityGroupIngress(this, "GoIngressFromLambda", {
+      groupId: goSecurityGroup.attrGroupId,
+      sourceSecurityGroupId: lambdaSecurityGroup.attrGroupId,
+      ipProtocol: "tcp",
+      fromPort: 8080,
+      toPort: 8080,
+      description: "HTTP from Token Query Lambda functions.",
+    });
+
     const privateSubnetIds = [privateSubnet1.ref, privateSubnet2.ref, privateSubnet3.ref];
+
+    const goRepository = new ecr.CfnRepository(this, "GoRepository", {
+      repositoryName: "token-query-go",
+      imageScanningConfiguration: {
+        scanOnPush: true,
+      },
+      imageTagMutability: "MUTABLE",
+      encryptionConfiguration: {
+        encryptionType: "AES256",
+      },
+      lifecyclePolicy: {
+        lifecyclePolicyText: JSON.stringify({
+          rules: [
+            {
+              rulePriority: 1,
+              description: "Keep recent Go service images and expire older untagged images.",
+              selection: {
+                tagStatus: "untagged",
+                countType: "sinceImagePushed",
+                countUnit: "days",
+                countNumber: 7,
+              },
+              action: {
+                type: "expire",
+              },
+            },
+          ],
+        }),
+      },
+      tags: nameTags("token-query-go"),
+    });
+
+    const ecsCluster = new ecs.CfnCluster(this, "EcsCluster", {
+      clusterName: "token-query-cluster",
+      tags: nameTags("token-query-cluster"),
+    });
+
+    const cloudMapNamespace = new servicediscovery.CfnPrivateDnsNamespace(this, "CloudMapNamespace", {
+      name: "token-query.internal",
+      vpc: vpc.ref,
+      description: "Private service discovery namespace for Token Query services.",
+      tags: nameTags("token-query-internal-namespace"),
+    });
+
+    const goCodeBuildRole = new iam.Role(this, "GoCodeBuildRole", {
+      roleName: "token-query-go-codebuild-role",
+      assumedBy: new iam.ServicePrincipal("codebuild.amazonaws.com"),
+      description: "Service role used by CodeBuild to build and push the Token Query Go image.",
+    });
+    goCodeBuildRole.addToPolicy(
+      new iam.PolicyStatement({
+        actions: [
+          "logs:CreateLogGroup",
+          "logs:CreateLogStream",
+          "logs:PutLogEvents",
+        ],
+        resources: [
+          Fn.sub("arn:${AWS::Partition}:logs:${AWS::Region}:${AWS::AccountId}:log-group:/aws/codebuild/token-query-go-build"),
+          Fn.sub("arn:${AWS::Partition}:logs:${AWS::Region}:${AWS::AccountId}:log-group:/aws/codebuild/token-query-go-build:*"),
+        ],
+      }),
+    );
+    goCodeBuildRole.addToPolicy(
+      new iam.PolicyStatement({
+        actions: ["ecr:GetAuthorizationToken", "sts:GetCallerIdentity"],
+        resources: ["*"],
+      }),
+    );
+    goCodeBuildRole.addToPolicy(
+      new iam.PolicyStatement({
+        actions: [
+          "ecr:BatchCheckLayerAvailability",
+          "ecr:CompleteLayerUpload",
+          "ecr:DescribeImages",
+          "ecr:DescribeRepositories",
+          "ecr:InitiateLayerUpload",
+          "ecr:PutImage",
+          "ecr:UploadLayerPart",
+        ],
+        resources: [goRepository.attrArn],
+      }),
+    );
+
+    const goCodeBuildProject = new codebuild.CfnProject(this, "GoCodeBuildProject", {
+      name: "token-query-go-build",
+      description: "Builds and pushes the Token Query Go service image to ECR.",
+      serviceRole: goCodeBuildRole.roleArn,
+      source: {
+        type: "GITHUB",
+        location: "https://github.com/pws019/token-query.git",
+        buildSpec: "infra/codebuild/go-buildspec.yml",
+        gitCloneDepth: 1,
+      },
+      artifacts: {
+        type: "NO_ARTIFACTS",
+      },
+      environment: {
+        type: "ARM_CONTAINER",
+        image: "aws/codebuild/amazonlinux-aarch64-standard:4.0",
+        computeType: "BUILD_GENERAL1_SMALL",
+        privilegedMode: true,
+        environmentVariables: [
+          {
+            name: "AWS_REGION",
+            type: "PLAINTEXT",
+            value: this.region,
+          },
+          {
+            name: "ECR_REPOSITORY",
+            type: "PLAINTEXT",
+            value: goRepository.ref,
+          },
+          {
+            name: "ECR_REPOSITORY_URI",
+            type: "PLAINTEXT",
+            value: goRepository.attrRepositoryUri,
+          },
+        ],
+      },
+      logsConfig: {
+        cloudWatchLogs: {
+          status: "ENABLED",
+          groupName: "/aws/codebuild/token-query-go-build",
+        },
+      },
+      queuedTimeoutInMinutes: 30,
+      timeoutInMinutes: 30,
+      tags: nameTags("token-query-go-build"),
+    });
 
     const dbSubnetGroup = new rds.CfnDBSubnetGroup(this, "DbSubnetGroup", {
       dbSubnetGroupDescription: "token-query-db-subnet-group",
@@ -241,6 +412,41 @@ export class FoundationStack extends Stack {
       stringValue: dbSecurityGroup.attrGroupId,
     });
 
+    new ssm.StringParameter(this, "GoSecurityGroupIdParam", {
+      parameterName: "/token-query/foundation/go-security-group-id",
+      stringValue: goSecurityGroup.attrGroupId,
+    });
+
+    new ssm.StringParameter(this, "EcrRepositoryNameParam", {
+      parameterName: "/token-query/foundation/ecr-repository-name",
+      stringValue: goRepository.ref,
+    });
+
+    new ssm.StringParameter(this, "EcrRepositoryUriParam", {
+      parameterName: "/token-query/foundation/ecr-repository-uri",
+      stringValue: goRepository.attrRepositoryUri,
+    });
+
+    new ssm.StringParameter(this, "EcsClusterNameParam", {
+      parameterName: "/token-query/foundation/ecs-cluster-name",
+      stringValue: ecsCluster.ref,
+    });
+
+    new ssm.StringParameter(this, "CloudMapNamespaceIdParam", {
+      parameterName: "/token-query/foundation/cloudmap-namespace-id",
+      stringValue: cloudMapNamespace.attrId,
+    });
+
+    new ssm.StringParameter(this, "CloudMapNamespaceNameParam", {
+      parameterName: "/token-query/foundation/cloudmap-namespace-name",
+      stringValue: "token-query.internal",
+    });
+
+    new ssm.StringParameter(this, "GoCodeBuildProjectNameParam", {
+      parameterName: "/token-query/foundation/go-codebuild-project-name",
+      stringValue: goCodeBuildProject.ref,
+    });
+
     new CfnOutput(this, "VpcId", {
       value: vpc.ref,
     });
@@ -263,6 +469,34 @@ export class FoundationStack extends Stack {
 
     new CfnOutput(this, "DbSecurityGroupId", {
       value: dbSecurityGroup.attrGroupId,
+    });
+
+    new CfnOutput(this, "GoSecurityGroupId", {
+      value: goSecurityGroup.attrGroupId,
+    });
+
+    new CfnOutput(this, "EcrRepositoryName", {
+      value: goRepository.ref,
+    });
+
+    new CfnOutput(this, "EcrRepositoryUri", {
+      value: goRepository.attrRepositoryUri,
+    });
+
+    new CfnOutput(this, "EcsClusterName", {
+      value: ecsCluster.ref,
+    });
+
+    new CfnOutput(this, "CloudMapNamespaceId", {
+      value: cloudMapNamespace.attrId,
+    });
+
+    new CfnOutput(this, "CloudMapNamespaceName", {
+      value: "token-query.internal",
+    });
+
+    new CfnOutput(this, "GoCodeBuildProjectName", {
+      value: goCodeBuildProject.ref,
     });
   }
 }

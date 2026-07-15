@@ -19,6 +19,7 @@ type ExecutionContext = {
 };
 
 const ssrHandler = createRequestHandler(build, import.meta.env?.MODE);
+const requestIdHeader = "X-Request-Id";
 
 export default {
   async fetch(request: Request, env: Env, ctx: ExecutionContext) {
@@ -48,14 +49,19 @@ async function proxyToLambda(request: Request, env: Env) {
   const upstreamUrl = new URL(incomingUrl.pathname + incomingUrl.search, env.LAMBDA_API_ORIGIN);
   const headers = new Headers(request.headers);
   const startedAt = Date.now();
+  const requestId = ensureRequestId(headers);
 
   console.log("proxy to lambda", {
+    requestId,
+    appEnv: env.PREVIEW_ID ? "preview" : "prod",
+    previewId: env.PREVIEW_ID,
     method: request.method,
     path: incomingUrl.pathname,
     upstreamOrigin: upstreamUrl.origin,
   });
 
   headers.delete("host");
+  headers.set(requestIdHeader, requestId);
   if (env.INTERNAL_PROXY_TOKEN) {
     headers.set("X-Internal-Proxy-Token", env.INTERNAL_PROXY_TOKEN);
   }
@@ -73,6 +79,9 @@ async function proxyToLambda(request: Request, env: Env) {
     });
   } catch (error) {
     console.error("lambda proxy fetch failed", {
+      requestId,
+      appEnv: env.PREVIEW_ID ? "preview" : "prod",
+      previewId: env.PREVIEW_ID,
       method: request.method,
       path: incomingUrl.pathname,
       upstreamOrigin: upstreamUrl.origin,
@@ -87,12 +96,16 @@ async function proxyToLambda(request: Request, env: Env) {
         status: 502,
         headers: {
           "X-Token-Query-Proxy": "cloudflare-worker",
+          [requestIdHeader]: requestId,
         },
       },
     );
   }
 
   console.log("lambda proxy response", {
+    requestId,
+    appEnv: env.PREVIEW_ID ? "preview" : "prod",
+    previewId: env.PREVIEW_ID,
     method: request.method,
     path: incomingUrl.pathname,
     status: response.status,
@@ -107,6 +120,9 @@ async function proxyToLambda(request: Request, env: Env) {
       .catch(() => "<unavailable>");
 
     console.error("lambda proxy upstream error", {
+      requestId,
+      appEnv: env.PREVIEW_ID ? "preview" : "prod",
+      previewId: env.PREVIEW_ID,
       method: request.method,
       path: incomingUrl.pathname,
       status: response.status,
@@ -123,5 +139,15 @@ async function proxyToLambda(request: Request, env: Env) {
   });
   proxiedResponse.headers.set("X-Token-Query-Proxy", "cloudflare-worker");
   proxiedResponse.headers.set("X-Token-Query-Upstream-Status", String(response.status));
+  proxiedResponse.headers.set(requestIdHeader, requestId);
   return proxiedResponse;
+}
+
+function ensureRequestId(headers: Headers) {
+  const incomingRequestId = headers.get(requestIdHeader);
+  if (incomingRequestId && /^[a-zA-Z0-9._:-]{1,128}$/.test(incomingRequestId)) {
+    return incomingRequestId;
+  }
+
+  return crypto.randomUUID();
 }

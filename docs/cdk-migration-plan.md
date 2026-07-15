@@ -47,8 +47,18 @@ Responsibilities:
 - GitHub Actions OIDC provider.
 - GitHub Actions deploy role.
 - IAM policies needed by deployment workflows.
-- Permissions that allow application stacks to create their own runtime roles
-  for Lambda, CodeBuild, ECS task execution, and ECS tasks.
+- Permissions that allow application stacks to create their own runtime roles.
+
+Principle:
+
+- Keep this layer limited to permissions that must exist before other stacks can
+  deploy, such as the GitHub OIDC deploy entry point.
+- Runtime roles should be created by the stack that owns the resource whenever
+  possible. Lambda execution roles belong in the Lambda/API stack, ECS task
+  roles belong in the Go stack, and CodeBuild service roles belong in the stack
+  that defines the CodeBuild project.
+- Do not pre-create resource-specific roles here unless there is a concrete
+  cross-stack reason.
 
 Initial implementation:
 
@@ -74,8 +84,8 @@ The first deployment should be performed manually from a trusted local AWS
 session. After it exists, GitHub Actions can deploy the application and preview
 layers.
 
-The permissions stack uses the legacy synthesizer because it contains only IAM
-and SSM resources. This makes the first deployment use the currently
+The permissions stack uses `CliCredentialsStackSynthesizer` because it contains
+only IAM and SSM resources. This makes the first deployment use the currently
 authenticated local AWS identity instead of the CDK bootstrap deployment roles.
 Later stacks that package Lambda or container assets can use the default CDK
 synthesizer and the normal CDK bootstrap resources.
@@ -97,13 +107,18 @@ Responsibilities:
 - NAT Gateway.
 - Lambda security group.
 - Database security group.
+- Go service security group.
 - Aurora PostgreSQL.
+- ECR repository for the Go service image.
+- ECS cluster shared by production and preview Go services.
+- Cloud Map private DNS namespace shared by production and preview Go services.
+- CodeBuild project for building and pushing the Go service image.
 - Stable SSM parameters or CloudFormation outputs consumed by application
   stacks.
 
 This layer should change rarely. It is shared by the production API and PR
 preview APIs. Preview deployments should not create their own VPC, NAT Gateway,
-or database.
+database, ECR repository, ECS cluster, or Cloud Map namespace.
 
 Initial implementation:
 
@@ -113,6 +128,12 @@ Initial implementation:
 - One NAT Gateway shared by the private subnets.
 - `token-query-lambda-sg`.
 - `token-query-db-sg`, allowing PostgreSQL 5432 from the Lambda security group.
+- `token-query-go-sg`, allowing port 8080 from the Lambda security group.
+- `token-query-db-sg` also allows PostgreSQL 5432 from `token-query-go-sg`.
+- ECR repository `token-query-go`.
+- ECS cluster `token-query-cluster`.
+- Cloud Map private namespace `token-query.internal`.
+- CodeBuild project `token-query-go-build`.
 - Secrets Manager secret `token-query/db/master` for Aurora master credentials.
 - Aurora PostgreSQL Serverless v2 cluster `token-query-db`.
 - Aurora instance `token-query-db-instance-1`.
@@ -123,6 +144,13 @@ Initial implementation:
   - `/token-query/foundation/db-cluster-endpoint`
   - `/token-query/foundation/db-credentials-secret-arn`
   - `/token-query/foundation/db-security-group-id`
+  - `/token-query/foundation/go-security-group-id`
+  - `/token-query/foundation/ecr-repository-name`
+  - `/token-query/foundation/ecr-repository-uri`
+  - `/token-query/foundation/ecs-cluster-name`
+  - `/token-query/foundation/cloudmap-namespace-id`
+  - `/token-query/foundation/cloudmap-namespace-name`
+  - `/token-query/foundation/go-codebuild-project-name`
 
 Deployment notes:
 
@@ -190,6 +218,47 @@ pnpm --filter @token-query/infra-cdk cdk diff token-query-api
 pnpm --filter @token-query/infra-cdk cdk deploy token-query-api
 ```
 
+### 3b. Go Application Layer
+
+Stack name:
+
+```text
+token-query-go
+```
+
+Responsibilities:
+
+- Production Go ECS task execution role.
+- Production Go ECS task role.
+- CloudWatch log group `/ecs/token-query-go`.
+- ECS task definition.
+- ECS service `token-query-go-service`.
+- Cloud Map service `go.token-query.internal`.
+- Runtime environment for the Go container, including `PORT=8080`, database
+  host metadata, and database password injected from Secrets Manager as an ECS
+  container secret.
+- Image tag parameter used to deploy a specific ECR image version.
+
+This layer reuses foundation resources:
+
+- ECR repository `token-query-go`.
+- ECS cluster `token-query-cluster`.
+- Private subnets.
+- Go security group.
+- Cloud Map namespace `token-query.internal`.
+- Aurora endpoint and credentials secret.
+
+Current implementation supports a manually supplied image tag:
+
+```bash
+pnpm --filter @token-query/infra-cdk cdk deploy token-query-go \
+  --parameters ImageTag=<short-sha-or-manual-tag>
+```
+
+The production Go deployment workflow starts the foundation-managed CodeBuild
+project, waits for it to push the image tag to ECR, then deploys this stack with
+that tag.
+
 ### 4. Application Preview Layer
 
 Planned stack naming pattern:
@@ -222,7 +291,46 @@ production Lambda entrypoint checks whether it is running with `APP_ENV=prod`.
 If so, it attempts to invoke `token-query-pr-<preview-id>` with the original
 API Gateway event. If the preview function does not exist, the request falls
 back to the production handler. Preview Lambdas run with `APP_ENV=preview`, so
-they do not recursively route preview requests.
+  they do not recursively route preview requests.
+
+### 5. Go Application Preview Layer
+
+Planned stack naming pattern:
+
+```text
+token-query-preview-go-<preview-id>
+```
+
+Responsibilities:
+
+- PR-scoped ECS task definition revision.
+- PR-scoped ECS service `token-query-go-pr-<preview-id>`.
+- PR-scoped CloudWatch log group `/ecs/token-query-go-pr-<preview-id>`.
+- PR-scoped Cloud Map service `go-<preview-id>.token-query.internal`.
+- Image tag parameter, usually `<preview-id>-<short-sha>`.
+
+This layer should copy application runtime resources only. It reuses:
+
+- VPC.
+- Private subnets.
+- NAT gateway.
+- Aurora database.
+- ECR repository.
+- ECS cluster.
+- Cloud Map namespace.
+- Security groups.
+
+Preview Lambda should receive:
+
+```text
+GO_SERVICE_ORIGIN=http://go-<preview-id>.token-query.internal:8080
+```
+
+Production Lambda keeps:
+
+```text
+GO_SERVICE_ORIGIN=http://go.token-query.internal:8080
+```
 
 ## Implementation Order
 
@@ -240,17 +348,22 @@ they do not recursively route preview requests.
 12. Verify Lambda outbound access to GitHub through NAT.
 13. Implement the application preview layer.
 14. Add backend PR preview deployment and cleanup workflows.
-15. Add ECS/Fargate and Cloud Map for the future Go service.
-16. Gradually migrate backend logic from Lambda into the Go service.
+15. Add shared Go infrastructure to the foundation layer.
+16. Add `token-query-go` for the production ECS/Fargate Go service.
+17. Add CodeBuild for Go image build and ECR push.
+18. Add `token-query-preview-go-<preview-id>` for PR-scoped Go ECS services.
+19. Gradually migrate backend logic from Lambda into the Go service.
 
 ## Destroy Order
 
 Destroy stacks in the reverse order of their dependencies:
 
 1. `token-query-preview-api-*`
-2. `token-query-api`
-3. `token-query-foundation`
-4. `token-query-permissions`
+2. `token-query-preview-go-*`
+3. `token-query-go`
+4. `token-query-api`
+5. `token-query-foundation`
+6. `token-query-permissions`
 
 Preview stacks should be destroyed first because they are short-lived
 application resources that reuse the shared foundation layer. The main
@@ -267,6 +380,8 @@ Recommended manual sequence:
 
 ```bash
 pnpm --filter @token-query/infra-cdk cdk destroy token-query-preview-api-<preview-id>
+pnpm --filter @token-query/infra-cdk cdk destroy token-query-preview-go-<preview-id>
+pnpm --filter @token-query/infra-cdk cdk destroy token-query-go
 pnpm --filter @token-query/infra-cdk cdk destroy token-query-api
 pnpm --filter @token-query/infra-cdk cdk destroy token-query-foundation
 pnpm --filter @token-query/infra-cdk cdk destroy token-query-permissions
