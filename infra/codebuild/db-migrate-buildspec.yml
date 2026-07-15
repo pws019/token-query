@@ -29,5 +29,5 @@ phases:
   build:
     commands:
       - set -euo pipefail
-      - echo "Running database command: $DB_MIGRATION_COMMAND"
+      - 'echo "Running database command: $DB_MIGRATION_COMMAND"'
       - eval "$DB_MIGRATION_COMMAND"
