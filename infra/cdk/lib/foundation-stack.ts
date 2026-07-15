@@ -1,8 +1,10 @@
 import { CfnOutput, Fn, Stack, type StackProps } from "aws-cdk-lib";
 import {
+  aws_codebuild as codebuild,
   aws_ec2 as ec2,
   aws_ecr as ecr,
   aws_ecs as ecs,
+  aws_iam as iam,
   aws_rds as rds,
   aws_secretsmanager as secretsmanager,
   aws_servicediscovery as servicediscovery,
@@ -238,6 +240,92 @@ export class FoundationStack extends Stack {
       tags: nameTags("token-query-internal-namespace"),
     });
 
+    const goCodeBuildRole = new iam.Role(this, "GoCodeBuildRole", {
+      roleName: "token-query-go-codebuild-role",
+      assumedBy: new iam.ServicePrincipal("codebuild.amazonaws.com"),
+      description: "Service role used by CodeBuild to build and push the Token Query Go image.",
+    });
+    goCodeBuildRole.addToPolicy(
+      new iam.PolicyStatement({
+        actions: [
+          "logs:CreateLogGroup",
+          "logs:CreateLogStream",
+          "logs:PutLogEvents",
+        ],
+        resources: [
+          Fn.sub("arn:${AWS::Partition}:logs:${AWS::Region}:${AWS::AccountId}:log-group:/aws/codebuild/token-query-go-build"),
+          Fn.sub("arn:${AWS::Partition}:logs:${AWS::Region}:${AWS::AccountId}:log-group:/aws/codebuild/token-query-go-build:*"),
+        ],
+      }),
+    );
+    goCodeBuildRole.addToPolicy(
+      new iam.PolicyStatement({
+        actions: ["ecr:GetAuthorizationToken", "sts:GetCallerIdentity"],
+        resources: ["*"],
+      }),
+    );
+    goCodeBuildRole.addToPolicy(
+      new iam.PolicyStatement({
+        actions: [
+          "ecr:BatchCheckLayerAvailability",
+          "ecr:CompleteLayerUpload",
+          "ecr:DescribeImages",
+          "ecr:DescribeRepositories",
+          "ecr:InitiateLayerUpload",
+          "ecr:PutImage",
+          "ecr:UploadLayerPart",
+        ],
+        resources: [goRepository.attrArn],
+      }),
+    );
+
+    const goCodeBuildProject = new codebuild.CfnProject(this, "GoCodeBuildProject", {
+      name: "token-query-go-build",
+      description: "Builds and pushes the Token Query Go service image to ECR.",
+      serviceRole: goCodeBuildRole.roleArn,
+      source: {
+        type: "GITHUB",
+        location: "https://github.com/pws019/token-query.git",
+        buildSpec: "infra/codebuild/go-buildspec.yml",
+        gitCloneDepth: 1,
+      },
+      artifacts: {
+        type: "NO_ARTIFACTS",
+      },
+      environment: {
+        type: "ARM_CONTAINER",
+        image: "aws/codebuild/amazonlinux-aarch64-standard:4.0",
+        computeType: "BUILD_GENERAL1_SMALL",
+        privilegedMode: true,
+        environmentVariables: [
+          {
+            name: "AWS_REGION",
+            type: "PLAINTEXT",
+            value: this.region,
+          },
+          {
+            name: "ECR_REPOSITORY",
+            type: "PLAINTEXT",
+            value: goRepository.ref,
+          },
+          {
+            name: "ECR_REPOSITORY_URI",
+            type: "PLAINTEXT",
+            value: goRepository.attrRepositoryUri,
+          },
+        ],
+      },
+      logsConfig: {
+        cloudWatchLogs: {
+          status: "ENABLED",
+          groupName: "/aws/codebuild/token-query-go-build",
+        },
+      },
+      queuedTimeoutInMinutes: 30,
+      timeoutInMinutes: 30,
+      tags: nameTags("token-query-go-build"),
+    });
+
     const dbSubnetGroup = new rds.CfnDBSubnetGroup(this, "DbSubnetGroup", {
       dbSubnetGroupDescription: "token-query-db-subnet-group",
       subnetIds: privateSubnetIds,
@@ -354,6 +442,11 @@ export class FoundationStack extends Stack {
       stringValue: "token-query.internal",
     });
 
+    new ssm.StringParameter(this, "GoCodeBuildProjectNameParam", {
+      parameterName: "/token-query/foundation/go-codebuild-project-name",
+      stringValue: goCodeBuildProject.ref,
+    });
+
     new CfnOutput(this, "VpcId", {
       value: vpc.ref,
     });
@@ -400,6 +493,10 @@ export class FoundationStack extends Stack {
 
     new CfnOutput(this, "CloudMapNamespaceName", {
       value: "token-query.internal",
+    });
+
+    new CfnOutput(this, "GoCodeBuildProjectName", {
+      value: goCodeBuildProject.ref,
     });
   }
 }

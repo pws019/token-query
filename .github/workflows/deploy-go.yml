@@ -1,0 +1,159 @@
+name: Deploy Go
+
+on:
+  push:
+    branches:
+      - main
+      - main-v2
+    paths:
+      - "apps/go-service/**"
+      - "infra/codebuild/**"
+      - "infra/cdk/**"
+      - ".github/workflows/deploy-go.yml"
+  workflow_dispatch:
+    inputs:
+      image_tag:
+        description: "Optional image tag. Defaults to go-<short-sha>."
+        required: false
+        type: string
+
+permissions:
+  contents: read
+  id-token: write
+
+concurrency:
+  group: go-prod
+  cancel-in-progress: false
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    env:
+      AWS_REGION: ${{ vars.AWS_REGION || 'us-west-2' }}
+      CDK_STACK_NAME: token-query-go
+      CODEBUILD_PROJECT_NAME: ${{ vars.GO_CODEBUILD_PROJECT_NAME || 'token-query-go-build' }}
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v6
+
+      - name: Resolve image tag
+        env:
+          INPUT_IMAGE_TAG: ${{ inputs.image_tag || '' }}
+        run: |
+          set -euo pipefail
+
+          short_sha="${GITHUB_SHA:0:7}"
+          image_tag="$INPUT_IMAGE_TAG"
+
+          if [ -z "$image_tag" ]; then
+            image_tag="go-$short_sha"
+          fi
+
+          if [[ ! "$image_tag" =~ ^[a-zA-Z0-9._-]{1,128}$ ]]; then
+            echo "::error::image_tag must be a valid Docker tag."
+            exit 1
+          fi
+
+          {
+            echo "IMAGE_TAG=$image_tag"
+            echo "SHORT_SHA=$short_sha"
+          } >> "$GITHUB_ENV"
+
+      - name: Setup pnpm
+        uses: pnpm/action-setup@v6
+        with:
+          version: 11.8.0
+
+      - name: Setup Node
+        uses: actions/setup-node@v6
+        with:
+          node-version: 22
+          cache: pnpm
+
+      - name: Install dependencies
+        run: pnpm install --frozen-lockfile
+
+      - name: Check deployment settings
+        env:
+          AWS_DEPLOY_ROLE_ARN: ${{ secrets.AWS_DEPLOY_ROLE_ARN }}
+        run: |
+          set -euo pipefail
+
+          test -n "$AWS_REGION"
+          test -n "$AWS_DEPLOY_ROLE_ARN"
+          test -n "$CDK_STACK_NAME"
+          test -n "$CODEBUILD_PROJECT_NAME"
+          test -n "$IMAGE_TAG"
+
+      - name: Check CDK types
+        run: pnpm --filter @token-query/infra-cdk check-types
+
+      - name: Configure AWS credentials
+        uses: aws-actions/configure-aws-credentials@v6
+        with:
+          role-to-assume: ${{ secrets.AWS_DEPLOY_ROLE_ARN }}
+          aws-region: ${{ env.AWS_REGION }}
+
+      - name: Start CodeBuild image build
+        run: |
+          set -euo pipefail
+
+          build_id="$(
+            aws codebuild start-build \
+              --project-name "$CODEBUILD_PROJECT_NAME" \
+              --source-version "$GITHUB_SHA" \
+              --environment-variables-override \
+                name=IMAGE_TAG,value="$IMAGE_TAG",type=PLAINTEXT \
+              --query 'build.id' \
+              --output text
+          )"
+
+          test -n "$build_id"
+          echo "CODEBUILD_BUILD_ID=$build_id" >> "$GITHUB_ENV"
+          echo "Started CodeBuild build: $build_id"
+
+      - name: Wait for CodeBuild image build
+        run: |
+          set -euo pipefail
+
+          while true; do
+            read -r status log_url <<< "$(
+              aws codebuild batch-get-builds \
+                --ids "$CODEBUILD_BUILD_ID" \
+                --query 'builds[0].[buildStatus,logs.deepLink]' \
+                --output text
+            )"
+
+            echo "CodeBuild status: $status"
+
+            case "$status" in
+              SUCCEEDED)
+                echo "CodeBuild succeeded: $log_url"
+                break
+                ;;
+              FAILED|FAULT|STOPPED|TIMED_OUT)
+                echo "::error::CodeBuild failed with status $status. Logs: $log_url"
+                exit 1
+                ;;
+              *)
+                sleep 15
+                ;;
+            esac
+          done
+
+      - name: Deploy Go CDK stack
+        run: |
+          set -euo pipefail
+
+          pnpm --filter @token-query/infra-cdk cdk deploy "$CDK_STACK_NAME" \
+            --require-approval never \
+            --parameters "$CDK_STACK_NAME:ImageTag=$IMAGE_TAG"
+
+      - name: Show CDK outputs
+        run: |
+          aws cloudformation describe-stacks \
+            --stack-name "$CDK_STACK_NAME" \
+            --region "$AWS_REGION" \
+            --query 'Stacks[0].Outputs' \
+            --output table

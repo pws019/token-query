@@ -2,6 +2,7 @@ import { InvokeCommand, LambdaClient } from "@aws-sdk/client-lambda";
 import { env } from "@token-query/env/server";
 
 import { app } from "./app.lambda";
+import { ensureRequestId, logError, logInfo, requestIdHeader } from "./utils/request-log";
 
 type LambdaEvent = {
   version?: string;
@@ -34,8 +35,18 @@ type LambdaResult = {
 const lambdaClient = new LambdaClient({});
 
 export async function handler(event: LambdaEvent): Promise<LambdaResult> {
+  const requestId = ensureEventRequestId(event);
+  logInfo("lambda_event_received", {
+    requestId,
+    appEnv: env.APP_ENV,
+    previewId: getHeader(event, "x-preview-id") ?? env.PREVIEW_ID,
+    method: event.requestContext?.http?.method ?? event.httpMethod ?? "GET",
+    path: event.rawPath ?? event.path ?? event.requestContext?.http?.path ?? "/",
+  });
+
   const previewResult = await maybeInvokePreview(event);
   if (previewResult) {
+    previewResult.headers[requestIdHeader] = requestId;
     return previewResult;
   }
 
@@ -55,6 +66,14 @@ async function maybeInvokePreview(event: LambdaEvent): Promise<LambdaResult | un
   }
 
   const functionName = `token-query-pr-${previewId}`;
+  const requestId = getHeader(event, requestIdHeader.toLowerCase());
+
+  logInfo("preview_lambda_invoke_start", {
+    requestId,
+    appEnv: env.APP_ENV,
+    previewId,
+    functionName,
+  });
 
   try {
     const result = await lambdaClient.send(
@@ -66,11 +85,24 @@ async function maybeInvokePreview(event: LambdaEvent): Promise<LambdaResult | un
     );
 
     if (!result.Payload) {
+      logError("preview_lambda_empty_response", {
+        requestId,
+        appEnv: env.APP_ENV,
+        previewId,
+        functionName,
+      });
       return jsonResult(502, { error: "Preview Lambda returned an empty response." });
     }
 
     const payload = JSON.parse(Buffer.from(result.Payload).toString("utf8")) as LambdaResult;
     if (result.FunctionError) {
+      logError("preview_lambda_function_error", {
+        requestId,
+        appEnv: env.APP_ENV,
+        previewId,
+        functionName,
+        functionError: result.FunctionError,
+      });
       return jsonResult(502, {
         error: "Preview Lambda invocation failed.",
         previewId,
@@ -78,13 +110,29 @@ async function maybeInvokePreview(event: LambdaEvent): Promise<LambdaResult | un
       });
     }
 
+    logInfo("preview_lambda_invoke_success", {
+      requestId,
+      appEnv: env.APP_ENV,
+      previewId,
+      functionName,
+      status: payload.statusCode,
+    });
+
     return payload;
   } catch (error) {
     if (isLambdaNotFoundError(error)) {
+      logInfo("preview_lambda_not_found_fallback", {
+        requestId,
+        appEnv: env.APP_ENV,
+        previewId,
+        functionName,
+      });
       return undefined;
     }
 
-    console.error("preview lambda invoke failed", {
+    logError("preview_lambda_invoke_failed", {
+      requestId,
+      appEnv: env.APP_ENV,
       previewId,
       functionName,
       error: error instanceof Error ? error.message : String(error),
@@ -140,6 +188,23 @@ function getHeader(event: LambdaEvent, targetName: string) {
   }
 
   return undefined;
+}
+
+function ensureEventRequestId(event: LambdaEvent) {
+  const headers = new Headers();
+  for (const [name, value] of Object.entries(event.headers ?? {})) {
+    if (value !== undefined) {
+      headers.set(name, value);
+    }
+  }
+
+  const requestId = ensureRequestId(headers);
+  event.headers = {
+    ...(event.headers ?? {}),
+    [requestIdHeader]: requestId,
+  };
+
+  return requestId;
 }
 
 function isValidPreviewId(previewId: string) {

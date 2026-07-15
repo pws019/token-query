@@ -412,7 +412,8 @@ token-query-go
   -> ECS service: token-query-go-service
   -> Cloud Map service: go.token-query.internal
   -> ImageTag parameter
-  -> DATABASE_URL env from existing Aurora endpoint + Secrets Manager dynamic reference
+  -> database host env from Aurora endpoint
+  -> database password from Secrets Manager as an ECS container secret
 ```
 
 生产 Go 服务关系：
@@ -454,6 +455,15 @@ curl -X POST https://app.doyouadoreme.online/api/github/profile/intro \
 - 用 CodeBuild 承接 Go Docker image 构建和推送 ECR。
 - GitHub Actions 不直接 docker build。
 
+当前落地：
+
+- Foundation layer 创建长期存在的 CodeBuild project：
+  `token-query-go-build`。
+- Buildspec 文件：`infra/codebuild/go-buildspec.yml`。
+- 正式发布 workflow：`.github/workflows/deploy-go.yml`。
+- Workflow 负责 start/wait CodeBuild，然后用同一个 `ImageTag` 部署
+  `token-query-go`。
+
 推荐流程：
 
 ```text
@@ -490,7 +500,7 @@ CodeBuild IAM 需要关注：
 - 读取源码或接收 source artifact。
 - 写 CloudWatch Logs。
 - 登录和推送 ECR。
-- 读取 Secrets Manager/SSM 中必要配置。
+- 当前镜像构建阶段不读取 Secrets Manager/SSM 中的运行时配置。
 - 后续如进 VPC 跑 migration，需要 VPC/subnet/security group 配置。
 
 验收方式：

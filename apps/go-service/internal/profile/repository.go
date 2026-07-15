@@ -6,6 +6,7 @@ import (
 
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgxpool"
+	"github.com/pws019/token-query/apps/go-service/internal/observability"
 )
 
 type Repository struct {
@@ -25,11 +26,23 @@ func (r *Repository) FindLoginByGithubID(ctx context.Context, githubID int64) (s
 	`, githubID).Scan(&login)
 
 	if errors.Is(err, pgx.ErrNoRows) {
+		observability.Warn(ctx, "go_profile_intro_db_not_found", map[string]any{
+			"githubId": githubID,
+		})
 		return "", ErrProfileNotFound
 	}
 	if err != nil {
+		observability.Error(ctx, "go_profile_intro_db_query_failed", map[string]any{
+			"githubId": githubID,
+			"error":    observability.ErrorString(err),
+		})
 		return "", err
 	}
+
+	observability.Info(ctx, "go_profile_intro_db_query_success", map[string]any{
+		"githubId": githubID,
+		"login":    login,
+	})
 
 	return login, nil
 }

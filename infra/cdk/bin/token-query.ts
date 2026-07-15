@@ -1,8 +1,9 @@
 #!/usr/bin/env node
-import { App, LegacyStackSynthesizer } from "aws-cdk-lib";
+import { App, CliCredentialsStackSynthesizer } from "aws-cdk-lib";
 
 import { ApiStack } from "../lib/api-stack";
 import { FoundationStack } from "../lib/foundation-stack";
+import { GoStack } from "../lib/go-stack";
 import { PermissionsStack } from "../lib/permissions-stack";
 import { PreviewApiStack } from "../lib/preview-api-stack";
 
@@ -15,10 +16,11 @@ const env = {
 
 new PermissionsStack(app, "token-query-permissions", {
   env,
-  synthesizer: new LegacyStackSynthesizer(),
+  synthesizer: new CliCredentialsStackSynthesizer(),
 });
 new FoundationStack(app, "token-query-foundation", { env });
 new ApiStack(app, "token-query-api", { env });
+new GoStack(app, "token-query-go", { env });
 
 const previewId = process.env.PREVIEW_ID;
 if (previewId) {
