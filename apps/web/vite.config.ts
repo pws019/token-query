@@ -2,7 +2,7 @@ import { reactRouter } from "@react-router/dev/vite";
 import tailwindcss from "@tailwindcss/vite";
 import { defineConfig } from "vite";
 
-export default defineConfig({
+export default defineConfig(({ command }) => ({
   cacheDir: "node_modules/.vite",
   plugins: [
     {
@@ -27,7 +27,7 @@ export default defineConfig({
     tsconfigPaths: true,
   },
   ssr: {
-    noExternal: ["@token-query/api", "@token-query/env", "@token-query/ui"],
+    noExternal: command === "serve" ? ["@token-query/api", "@token-query/env", "@token-query/ui"] : true,
     target: "webworker",
   },
   server: {
@@ -51,4 +51,4 @@ export default defineConfig({
       ],
     },
   },
-});
+}));
