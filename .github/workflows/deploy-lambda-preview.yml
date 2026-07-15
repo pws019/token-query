@@ -1,4 +1,4 @@
-name: Deploy API Preview
+name: Deploy Lambda Preview
 
 on:
   pull_request:
@@ -19,7 +19,7 @@ on:
       - "pnpm-workspace.yaml"
       - "turbo.json"
       - "infra/cdk/**"
-      - ".github/workflows/deploy-api-preview.yml"
+      - ".github/workflows/deploy-lambda-preview.yml"
       - "docs/pr-preview-naming.md"
 
 permissions:
@@ -29,7 +29,7 @@ permissions:
   pull-requests: write
 
 concurrency:
-  group: api-preview-${{ github.event.pull_request.number }}
+  group: lambda-preview-${{ github.event.pull_request.number }}
   cancel-in-progress: true
 
 jobs:
@@ -144,7 +144,7 @@ jobs:
           role-to-assume: ${{ secrets.AWS_DEPLOY_ROLE_ARN }}
           aws-region: ${{ env.AWS_REGION }}
 
-      - name: Deploy API preview stack
+      - name: Deploy Lambda preview stack
         env:
           INTERNAL_PROXY_TOKEN: ${{ secrets.INTERNAL_PROXY_TOKEN }}
           ADMIN_MIGRATION_TOKEN: ${{ secrets.ADMIN_MIGRATION_TOKEN }}
@@ -164,7 +164,7 @@ jobs:
             --require-approval never \
             "${parameters[@]}"
 
-      - name: Comment API preview result
+      - name: Comment Lambda preview result
         uses: actions/github-script@v7
         env:
           STACK_NAME: ${{ env.STACK_NAME }}
@@ -174,17 +174,16 @@ jobs:
           SHORT_SHA: ${{ env.SHORT_SHA }}
         with:
           script: |
-            const marker = "<!-- token-query-api-preview -->";
+            const marker = "<!-- token-query-lambda-preview -->";
             const body = `${marker}
-            API preview is ready.
+            Lambda preview is ready.
 
-            Preview URL: https://${process.env.PREVIEW_DOMAIN}
             Preview ID: \`${process.env.PREVIEW_ID}\`
             Stack: \`${process.env.STACK_NAME}\`
             Function: \`${process.env.FUNCTION_NAME}\`
             Commit: \`${process.env.SHORT_SHA}\`
 
-            Requests from the app preview include \`X-Preview-Id: ${process.env.PREVIEW_ID}\`, so the production API router will invoke this preview API.`;
+            A Worker deployed with the same Preview ID will send \`X-Preview-Id: ${process.env.PREVIEW_ID}\`, so the production Lambda router can invoke this preview Lambda.`;
 
             const { owner, repo } = context.repo;
             const issue_number = context.issue.number;

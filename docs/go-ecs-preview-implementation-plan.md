@@ -16,8 +16,8 @@
 
 ```text
 PR
-  -> App Preview Worker
-  -> API Preview Lambda
+  -> Worker Preview
+  -> Lambda Preview
   -> Go Preview ECS Service
   -> 数据库
 ```
@@ -80,6 +80,7 @@ PR
 - 触发或等待 CodeBuild。
 - PR 评论 preview 地址。
 - PR 关闭后的资源清理。
+- 手动部署指定 `preview_id` 的 Worker，用于给 Lambda/Go preview 暴露前端入口。
 
 ### CodeBuild 只在 Go 镜像阶段引入
 
@@ -112,12 +113,13 @@ CodeBuild 的首次合理使用点是：
 
 已有能力：
 
-- `Deploy App Preview` 可以为 PR 创建 Cloudflare Worker preview。
-- `Deploy API Preview` 可以为 PR 创建 Lambda preview。
+- `Deploy Worker Preview` 可以为前端 PR 创建 Cloudflare Worker preview。
+- `Deploy Worker Preview` 也可以手动运行，填写 `preview_id` 后创建同名 Worker preview。
+- `Deploy Lambda Preview` 可以为 Lambda PR 创建 Lambda preview。
 - Worker preview 会带 `X-Preview-Id`。
 - 生产 API Lambda 会根据 `X-Preview-Id` 调用对应 preview Lambda。
-- PR 关闭或合并后，cleanup workflow 会清理 app/api preview 资源。
-- `Deploy API` 已补充 `main-v2` push 触发条件。
+- Worker/Lambda preview cleanup 已按资源拆分。
+- `Deploy Lambda` 已补充 `main-v2` push 触发条件。
 
 验收方式：
 
@@ -456,10 +458,10 @@ Preview 资源命名：
 ```text
 Preview ID: feat-123
 
-App Worker:
+Worker:
   token-query-pr-feat-123
 
-API Preview Stack:
+Lambda Preview Stack:
   token-query-preview-api-feat-123
 
 Lambda:
@@ -477,16 +479,19 @@ Cloud Map service:
 
 Preview 触发规则：
 
-- 改前端：只部署 App Preview。
-- 改后端 Lambda/Go/CDK：部署 API Preview。
-- 后端 preview stack 内部创建完整后端链路：Lambda + Go。
-- PR 关闭或合并：统一 cleanup 同时尝试清理 App Preview 和 API Preview。
+- 改前端：只部署 Worker Preview。
+- 改 Lambda：只部署 Lambda Preview。
+- 改 Go：只部署 Go Preview。
+- 如果后端 preview 需要前端入口，手动运行 `Deploy Worker Preview`，填写同一个 `preview_id`。
+- PR 关闭或合并：按资源类型分别 cleanup。Worker cleanup 不再由 Lambda PR 隐式触发。
 
-为什么后端 preview 要创建完整链路：
+为什么 `preview_id` 仍然统一：
 
-- 如果只改 Go，不创建 Lambda，前端无法通过现有 preview header 路由到这套 Go。
-- 如果只改 Lambda，不创建 Go，Lambda 调 Go 的逻辑又要 fallback，复杂度会上升。
-- 对当前作业场景，后端 preview 统一创建 Lambda + Go 更简单。
+- `feat-123.app.doyouadoreme.online` 对应 `token-query-pr-feat-123` Worker。
+- Worker 带 `X-Preview-Id: feat-123`。
+- Lambda router 使用同一个 `feat-123` 找到 preview Lambda。
+- 后续 Go preview 也使用同一个 `feat-123` 生成 ECS service/image tag/Cloud Map 名称。
+- 自动部署按变更粒度拆开，但环境串联仍然由同一个 Preview ID 完成。
 
 验收方式：
 
@@ -520,15 +525,16 @@ curl https://<preview-id>.app.doyouadoreme.online/api/profile/intro
 
 ```text
 1. 创建 PR
-2. GitHub Actions 创建 App Preview + API Preview
-3. CodeBuild 构建 Go image 并推送 ECR
-4. CDK 部署 preview Lambda + ECS/Fargate Go service
-5. 打开 preview 前端
-6. 查询 token profile
-7. 点击生成个人介绍
-8. 展示 Go 从数据库查询后生成的 intro
-9. 合并或关闭 PR
-10. Cleanup workflow 清理 preview 资源
+2. GitHub Actions 按变更范围创建 Worker/Lambda/Go preview
+3. 如后端 PR 需要前端入口，手动运行 `Deploy Worker Preview` 并填写同一个 `preview_id`
+4. CodeBuild 构建 Go image 并推送 ECR
+5. CDK 部署 preview Lambda 或 ECS/Fargate Go service
+6. 打开 preview 前端
+7. 查询 token profile
+8. 点击生成个人介绍
+9. 展示 Go 从数据库查询后生成的 intro
+10. 合并或关闭 PR
+11. Cleanup workflow 按资源类型清理 preview 资源
 ```
 
 ## 明天建议执行顺序
@@ -544,4 +550,4 @@ curl https://<preview-id>.app.doyouadoreme.online/api/profile/intro
 9. 跑通 `前端 -> Lambda -> Go -> DB -> 前端`。
 10. 删除手动资源，将 ECR/ECS/Cloud Map/安全组规则归档到 CDK。
 11. 引入 CodeBuild 构建 Go image。
-12. 扩展 API Preview Stack，完成 PR 级 Go preview。
+12. 扩展 Lambda/Go Preview Stack，完成 PR 级 Go preview。

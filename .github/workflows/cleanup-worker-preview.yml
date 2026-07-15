@@ -1,4 +1,4 @@
-name: Cleanup Preview Resources
+name: Cleanup Worker Preview
 
 on:
   pull_request:
@@ -6,36 +6,61 @@ on:
       - closed
     branches:
       - main-v2
+    paths:
+      - "apps/web/**"
+      - "packages/env/**"
+      - "packages/ui/**"
+      - "package.json"
+      - "pnpm-lock.yaml"
+      - "pnpm-workspace.yaml"
+      - "turbo.json"
+      - ".github/workflows/deploy-worker-preview.yml"
+      - ".github/workflows/cleanup-worker-preview.yml"
+      - "docs/pr-preview-naming.md"
+  workflow_dispatch:
+    inputs:
+      preview_id:
+        description: "Preview ID to clean up, for example feat-001."
+        required: true
+        type: string
 
 permissions:
   contents: read
-  id-token: write
   issues: write
   pull-requests: write
 
 concurrency:
-  group: preview-cleanup-${{ github.event.pull_request.number }}
+  group: worker-preview-cleanup-${{ github.event.pull_request.number || inputs.preview_id }}
   cancel-in-progress: false
 
 jobs:
   cleanup:
     runs-on: ubuntu-latest
     env:
-      AWS_REGION: ${{ vars.AWS_REGION || 'us-west-2' }}
       PREVIEW_BASE_DOMAIN: ${{ vars.PREVIEW_BASE_DOMAIN || 'app.doyouadoreme.online' }}
 
     steps:
-      - name: Resolve PR preview names
+      - name: Resolve preview names
         env:
+          EVENT_NAME: ${{ github.event_name }}
           BRANCH_NAME: ${{ github.head_ref }}
           PR_TITLE: ${{ github.event.pull_request.title }}
+          INPUT_PREVIEW_ID: ${{ inputs.preview_id }}
         run: |
           set -euo pipefail
 
+          preview_id_regex='^(bug|feat|fix|chore|hotfix)-[0-9]+$'
           branch_regex='^(bug|feat|fix|chore|hotfix)/((bug|feat|fix|chore|hotfix)-[0-9]+)-[a-z0-9-]+$'
           title_regex='^((bug|feat|fix|chore|hotfix)-[0-9]+):'
 
-          if [[ "$BRANCH_NAME" =~ $branch_regex ]]; then
+          if [ "$EVENT_NAME" = "workflow_dispatch" ]; then
+            preview_id="$INPUT_PREVIEW_ID"
+
+            if [[ ! "$preview_id" =~ $preview_id_regex ]]; then
+              echo "::error::preview_id must match <type>-<number>, for example feat-001."
+              exit 1
+            fi
+          elif [[ "$BRANCH_NAME" =~ $branch_regex ]]; then
             preview_id="${BASH_REMATCH[2]}"
           elif [[ "$PR_TITLE" =~ $title_regex ]]; then
             preview_id="${BASH_REMATCH[1]}"
@@ -48,12 +73,7 @@ jobs:
             echo "PREVIEW_ID=$preview_id"
             echo "WORKER_NAME=token-query-pr-$preview_id"
             echo "PREVIEW_DOMAIN=$preview_id.$PREVIEW_BASE_DOMAIN"
-            echo "STACK_NAME=token-query-preview-api-$preview_id"
-            echo "FUNCTION_NAME=token-query-pr-$preview_id"
           } >> "$GITHUB_ENV"
-
-      - name: Checkout
-        uses: actions/checkout@v6
 
       - name: Setup pnpm
         uses: pnpm/action-setup@v6
@@ -64,30 +84,21 @@ jobs:
         uses: actions/setup-node@v6
         with:
           node-version: 22
-          cache: pnpm
 
-      - name: Install dependencies
-        run: pnpm install --frozen-lockfile
-
-      - name: Check preview cleanup settings
+      - name: Check Worker preview cleanup settings
         env:
           CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
           CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
-          AWS_DEPLOY_ROLE_ARN: ${{ secrets.AWS_DEPLOY_ROLE_ARN }}
         run: |
           set -euo pipefail
 
           test -n "$CLOUDFLARE_API_TOKEN"
           test -n "$CLOUDFLARE_ACCOUNT_ID"
-          test -n "$AWS_REGION"
-          test -n "$AWS_DEPLOY_ROLE_ARN"
           test -n "$PREVIEW_ID"
           test -n "$WORKER_NAME"
           test -n "$PREVIEW_DOMAIN"
-          test -n "$STACK_NAME"
-          test -n "$FUNCTION_NAME"
 
-      - name: Delete app preview Worker
+      - name: Delete preview Worker
         id: worker_cleanup
         continue-on-error: true
         env:
@@ -98,47 +109,21 @@ jobs:
 
           printf "yes\n" | pnpm dlx wrangler@4 delete --name "$WORKER_NAME"
 
-      - name: Configure AWS credentials
-        uses: aws-actions/configure-aws-credentials@v6
-        with:
-          role-to-assume: ${{ secrets.AWS_DEPLOY_ROLE_ARN }}
-          aws-region: ${{ env.AWS_REGION }}
-
-      - name: Build server asset for CDK synth
-        run: pnpm --filter server build
-
-      - name: Delete backend API preview stack
-        id: api_cleanup
-        run: |
-          set -euo pipefail
-
-          if ! aws cloudformation describe-stacks --stack-name "$STACK_NAME" --region "$AWS_REGION" >/dev/null 2>&1; then
-            echo "Preview stack $STACK_NAME does not exist; skipping AWS cleanup."
-            echo "api_cleanup_status=skipped" >> "$GITHUB_OUTPUT"
-            exit 0
-          fi
-
-          PREVIEW_ID="$PREVIEW_ID" pnpm --filter @token-query/infra-cdk cdk destroy "$STACK_NAME" --force
-          echo "api_cleanup_status=deleted" >> "$GITHUB_OUTPUT"
-
       - name: Comment cleanup result
-        if: always()
+        if: always() && github.event_name == 'pull_request'
         continue-on-error: true
         uses: actions/github-script@v7
         env:
           WORKER_CLEANUP_STATUS: ${{ steps.worker_cleanup.outcome }}
-          API_CLEANUP_STATUS: ${{ steps.api_cleanup.outputs.api_cleanup_status || steps.api_cleanup.outcome }}
         with:
           script: |
-            const marker = "<!-- token-query-preview-cleanup -->";
+            const marker = "<!-- token-query-worker-preview-cleanup -->";
             const merged = context.payload.pull_request?.merged === true;
             const body = `${marker}
-            Preview cleanup finished.
+            Worker preview cleanup finished.
 
             Preview URL: https://${process.env.PREVIEW_DOMAIN}
-            App Worker: \`${process.env.WORKER_NAME}\` (${process.env.WORKER_CLEANUP_STATUS})
-            Backend stack: \`${process.env.STACK_NAME}\` (${process.env.API_CLEANUP_STATUS})
-            Backend function: \`${process.env.FUNCTION_NAME}\`
+            Worker: \`${process.env.WORKER_NAME}\` (${process.env.WORKER_CLEANUP_STATUS})
             Preview ID: \`${process.env.PREVIEW_ID}\`
             PR result: ${merged ? "merged" : "closed"}`;
 
@@ -171,3 +156,16 @@ jobs:
             } catch (error) {
               core.warning(`Unable to comment cleanup result: ${error.message}`);
             }
+
+      - name: Write manual cleanup summary
+        if: always() && github.event_name == 'workflow_dispatch'
+        env:
+          WORKER_CLEANUP_STATUS: ${{ steps.worker_cleanup.outcome }}
+        run: |
+          {
+            echo "## Worker preview cleanup"
+            echo
+            echo "Preview URL: https://$PREVIEW_DOMAIN"
+            echo "Preview ID: \`$PREVIEW_ID\`"
+            echo "Worker: \`$WORKER_NAME\` ($WORKER_CLEANUP_STATUS)"
+          } >> "$GITHUB_STEP_SUMMARY"

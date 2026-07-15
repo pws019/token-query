@@ -78,9 +78,9 @@ NODE_ENV=production
 
 Local development reads the same variable names from `apps/server/.env`. In AWS, do not upload `.env`; configure the values in Lambda environment variables or through your deployment tool. If the database is in a private VPC, attach the Lambda function to the same VPC/subnets/security groups, or use an RDS Proxy endpoint in `DATABASE_URL`.
 
-### CDK API Deployment
+### CDK Lambda Deployment
 
-The backend API is deployed by `.github/workflows/deploy-api.yml` through AWS CDK. The PR preview API is deployed by `.github/workflows/deploy-api-preview.yml`.
+The Lambda backend is deployed by `.github/workflows/deploy-lambda.yml` through AWS CDK. The PR preview Lambda is deployed by `.github/workflows/deploy-lambda-preview.yml`.
 
 Current target runtime shape:
 
@@ -118,16 +118,17 @@ pnpm --filter server build
 pnpm --filter @token-query/infra-cdk cdk deploy token-query-api
 ```
 
-Preview requests use the same public API origin. The app preview Worker sends `X-Preview-Id`, and the production API Lambda routes matching requests to `token-query-pr-<preview-id>` when that preview function exists.
+Preview requests use the same public API origin. A preview Worker deployed with the same Preview ID sends `X-Preview-Id`, and the production Lambda routes matching requests to `token-query-pr-<preview-id>` when that preview function exists.
 
-GitHub Actions workflows are grouped by the public layer names:
+GitHub Actions workflows are grouped by deployed resource type:
 
 ```text
-deploy-api.yml           # production backend API
-deploy-api-preview.yml   # PR backend API preview
-deploy-app.yml           # production frontend app Worker
-deploy-app-preview.yml   # PR frontend app Worker preview
-cleanup-preview.yml      # PR preview cleanup for both app and API resources
+deploy-worker.yml            # production Cloudflare Worker
+deploy-worker-preview.yml    # PR or manual Cloudflare Worker preview
+cleanup-worker-preview.yml   # Cloudflare Worker preview cleanup
+deploy-lambda.yml            # production Lambda backend
+deploy-lambda-preview.yml    # PR Lambda preview
+cleanup-lambda-preview.yml   # Lambda preview cleanup
 ```
 
 Keep production runtime settings out of source control:

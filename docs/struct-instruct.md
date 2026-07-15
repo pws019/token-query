@@ -37,8 +37,8 @@ api.doyouadoreme.online              # 生产 api
 app.dev.doyouadoreme.online          # 固定 dev app
 api.dev.doyouadoreme.online          # 固定 dev api
 
-bug-111.app.dev.doyouadoreme.online  # bug-111 的 app preview
-bug-222.app.dev.doyouadoreme.online  # bug-222 的 app preview
+bug-111.app.dev.doyouadoreme.online  # bug-111 的 worker preview
+bug-222.app.dev.doyouadoreme.online  # bug-222 的 worker preview
 ```
 
 我不太建议：
