@@ -1,0 +1,166 @@
+name: Cleanup Preview Environment
+
+on:
+  workflow_dispatch:
+    inputs:
+      preview_id:
+        description: "Preview ID to clean up, for example feat-001."
+        required: true
+        type: string
+
+permissions:
+  contents: read
+  id-token: write
+
+concurrency:
+  group: preview-cleanup-${{ inputs.preview_id }}
+  cancel-in-progress: false
+
+jobs:
+  cleanup:
+    runs-on: ubuntu-latest
+    env:
+      AWS_REGION: ${{ vars.AWS_REGION || 'us-west-2' }}
+      PREVIEW_BASE_DOMAIN: ${{ vars.PREVIEW_BASE_DOMAIN || 'app.doyouadoreme.online' }}
+
+    steps:
+      - name: Resolve preview names
+        env:
+          INPUT_PREVIEW_ID: ${{ inputs.preview_id }}
+        run: |
+          set -euo pipefail
+
+          preview_id_regex='^(bug|feat|fix|chore|hotfix)-[0-9]+$'
+
+          if [[ ! "$INPUT_PREVIEW_ID" =~ $preview_id_regex ]]; then
+            echo "::error::preview_id must match <type>-<number>, for example feat-001."
+            exit 1
+          fi
+
+          {
+            echo "PREVIEW_ID=$INPUT_PREVIEW_ID"
+            echo "WORKER_NAME=token-query-pr-$INPUT_PREVIEW_ID"
+            echo "PREVIEW_DOMAIN=$INPUT_PREVIEW_ID.$PREVIEW_BASE_DOMAIN"
+            echo "LAMBDA_STACK_NAME=token-query-preview-api-$INPUT_PREVIEW_ID"
+            echo "LAMBDA_FUNCTION_NAME=token-query-pr-$INPUT_PREVIEW_ID"
+            echo "GO_STACK_NAME=token-query-preview-go-$INPUT_PREVIEW_ID"
+            echo "GO_SERVICE_NAME=token-query-go-pr-$INPUT_PREVIEW_ID"
+            echo "GO_SERVICE_ORIGIN=http://go-$INPUT_PREVIEW_ID.token-query.internal:8080"
+          } >> "$GITHUB_ENV"
+
+      - name: Setup pnpm
+        uses: pnpm/action-setup@v6
+        with:
+          version: 11.8.0
+
+      - name: Setup Node
+        uses: actions/setup-node@v6
+        with:
+          node-version: 22
+
+      - name: Check cleanup settings
+        env:
+          AWS_DEPLOY_ROLE_ARN: ${{ secrets.AWS_DEPLOY_ROLE_ARN }}
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+        run: |
+          set -euo pipefail
+
+          test -n "$AWS_REGION"
+          test -n "$AWS_DEPLOY_ROLE_ARN"
+          test -n "$CLOUDFLARE_API_TOKEN"
+          test -n "$CLOUDFLARE_ACCOUNT_ID"
+          test -n "$PREVIEW_ID"
+          test -n "$WORKER_NAME"
+          test -n "$LAMBDA_STACK_NAME"
+          test -n "$GO_STACK_NAME"
+
+      - name: Configure AWS credentials
+        uses: aws-actions/configure-aws-credentials@v6
+        with:
+          role-to-assume: ${{ secrets.AWS_DEPLOY_ROLE_ARN }}
+          aws-region: ${{ env.AWS_REGION }}
+
+      - name: Delete preview Worker
+        id: worker_cleanup
+        env:
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+        run: |
+          set -euo pipefail
+
+          if printf "yes\n" | pnpm dlx wrangler@4 delete --name "$WORKER_NAME"; then
+            echo "status=deleted" >> "$GITHUB_OUTPUT"
+          else
+            echo "::warning::Unable to delete Worker $WORKER_NAME. It may not exist, or the Cloudflare token may lack permission."
+            echo "status=failed-or-missing" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Delete Lambda preview stack
+        id: lambda_cleanup
+        run: |
+          set -euo pipefail
+
+          if ! aws cloudformation describe-stacks --stack-name "$LAMBDA_STACK_NAME" --region "$AWS_REGION" >/dev/null 2>&1; then
+            echo "Lambda preview stack $LAMBDA_STACK_NAME does not exist; skipping."
+            echo "status=skipped" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+
+          if ! aws cloudformation delete-stack --stack-name "$LAMBDA_STACK_NAME" --region "$AWS_REGION"; then
+            echo "::warning::Unable to start Lambda preview stack deletion: $LAMBDA_STACK_NAME"
+            echo "status=failed" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+
+          if aws cloudformation wait stack-delete-complete --stack-name "$LAMBDA_STACK_NAME" --region "$AWS_REGION"; then
+            echo "status=deleted" >> "$GITHUB_OUTPUT"
+          else
+            echo "::warning::Lambda preview stack deletion did not complete cleanly: $LAMBDA_STACK_NAME"
+            echo "status=failed" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Delete Go preview stack
+        id: go_cleanup
+        run: |
+          set -euo pipefail
+
+          if ! aws cloudformation describe-stacks --stack-name "$GO_STACK_NAME" --region "$AWS_REGION" >/dev/null 2>&1; then
+            echo "Go preview stack $GO_STACK_NAME does not exist; skipping."
+            echo "status=skipped" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+
+          if ! aws cloudformation delete-stack --stack-name "$GO_STACK_NAME" --region "$AWS_REGION"; then
+            echo "::warning::Unable to start Go preview stack deletion: $GO_STACK_NAME"
+            echo "status=failed" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+
+          if aws cloudformation wait stack-delete-complete --stack-name "$GO_STACK_NAME" --region "$AWS_REGION"; then
+            echo "status=deleted" >> "$GITHUB_OUTPUT"
+          else
+            echo "::warning::Go preview stack deletion did not complete cleanly: $GO_STACK_NAME"
+            echo "status=failed" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Write cleanup summary
+        if: always()
+        env:
+          WORKER_CLEANUP_STATUS: ${{ steps.worker_cleanup.outputs.status || steps.worker_cleanup.outcome }}
+          LAMBDA_CLEANUP_STATUS: ${{ steps.lambda_cleanup.outputs.status || steps.lambda_cleanup.outcome }}
+          GO_CLEANUP_STATUS: ${{ steps.go_cleanup.outputs.status || steps.go_cleanup.outcome }}
+        run: |
+          {
+            echo "## Preview environment cleanup"
+            echo
+            echo "Preview ID: \`$PREVIEW_ID\`"
+            echo
+            echo "| Layer | Resource | Status |"
+            echo "| --- | --- | --- |"
+            echo "| Worker | \`$WORKER_NAME\` / https://$PREVIEW_DOMAIN | $WORKER_CLEANUP_STATUS |"
+            echo "| Lambda | \`$LAMBDA_STACK_NAME\` / \`$LAMBDA_FUNCTION_NAME\` | $LAMBDA_CLEANUP_STATUS |"
+            echo "| Go | \`$GO_STACK_NAME\` / \`$GO_SERVICE_NAME\` | $GO_CLEANUP_STATUS |"
+            echo
+            echo "Go Cloud Map origin: \`$GO_SERVICE_ORIGIN\`"
+          } >> "$GITHUB_STEP_SUMMARY"

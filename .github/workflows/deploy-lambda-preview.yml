@@ -185,6 +185,7 @@ jobs:
             "${parameters[@]}"
 
       - name: Comment Lambda preview result
+        if: github.event_name == 'pull_request'
         uses: actions/github-script@v7
         env:
           STACK_NAME: ${{ env.STACK_NAME }}
@@ -230,3 +231,18 @@ jobs:
                 body,
               });
             }
+
+      - name: Write manual preview summary
+        if: github.event_name == 'workflow_dispatch'
+        run: |
+          {
+            echo "## Lambda preview"
+            echo
+            echo "Preview ID: \`$PREVIEW_ID\`"
+            echo "Stack: \`$STACK_NAME\`"
+            echo "Function: \`$FUNCTION_NAME\`"
+            echo "Preview domain: https://$PREVIEW_DOMAIN"
+            echo "Commit: \`$SHORT_SHA\`"
+            echo
+            echo "A Worker deployed with the same Preview ID will send \`X-Preview-Id: $PREVIEW_ID\`, so the production Lambda router can invoke this preview Lambda."
+          } >> "$GITHUB_STEP_SUMMARY"
