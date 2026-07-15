@@ -531,6 +531,18 @@ GitHub Actions PR
       -> ImageTag=<preview-id>-<short-sha>
 ```
 
+当前落地的 workflow：
+
+- `.github/workflows/deploy-go-preview.yml`
+  - PR 改动命中 `apps/go-service/**`、`infra/codebuild/**`、`infra/cdk/**` 时触发。
+  - 也支持 `workflow_dispatch`，手动填写 `preview_id` 和可选 `image_tag`。
+  - 使用同一个 CodeBuild 项目 `token-query-go-build` 构建并推送镜像。
+  - 默认镜像 tag 是 `<preview-id>-<short-sha>`。
+  - 部署 CDK stack `token-query-preview-go-<preview-id>`。
+- `.github/workflows/cleanup-go-preview.yml`
+  - PR 关闭/合并时删除 `token-query-preview-go-<preview-id>`。
+  - 也支持 `workflow_dispatch`，手动清理指定 `preview_id`。
+
 ## Phase 9：接入 PR Preview 后端 Go 资源
 
 目标：

@@ -1,0 +1,290 @@
+name: Deploy Go Preview
+
+on:
+  pull_request:
+    types:
+      - opened
+      - reopened
+      - synchronize
+      - edited
+    branches:
+      - main-v2
+    paths:
+      - "apps/go-service/**"
+      - "infra/codebuild/**"
+      - "infra/cdk/**"
+      - ".github/workflows/deploy-go-preview.yml"
+      - "docs/pr-preview-naming.md"
+  workflow_dispatch:
+    inputs:
+      preview_id:
+        description: "Preview ID to deploy, for example feat-001."
+        required: true
+        type: string
+      image_tag:
+        description: "Optional image tag. Defaults to <preview_id>-<short-sha>."
+        required: false
+        type: string
+
+permissions:
+  contents: read
+  id-token: write
+  issues: write
+  pull-requests: write
+
+concurrency:
+  group: go-preview-${{ github.event.pull_request.number || inputs.preview_id }}
+  cancel-in-progress: true
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    env:
+      AWS_REGION: ${{ vars.AWS_REGION || 'us-west-2' }}
+      CODEBUILD_PROJECT_NAME: ${{ vars.GO_CODEBUILD_PROJECT_NAME || 'token-query-go-build' }}
+
+    steps:
+      - name: Resolve preview names
+        id: preview
+        env:
+          EVENT_NAME: ${{ github.event_name }}
+          BRANCH_NAME: ${{ github.head_ref }}
+          PR_TITLE: ${{ github.event.pull_request.title }}
+          COMMIT_SHA: ${{ github.event.pull_request.head.sha || github.sha }}
+          INPUT_PREVIEW_ID: ${{ inputs.preview_id }}
+          INPUT_IMAGE_TAG: ${{ inputs.image_tag || '' }}
+        run: |
+          set -euo pipefail
+
+          preview_id_regex='^(bug|feat|fix|chore|hotfix)-[0-9]+$'
+          branch_regex='^(bug|feat|fix|chore|hotfix)/((bug|feat|fix|chore|hotfix)-[0-9]+)-[a-z0-9-]+$'
+          title_regex='^((bug|feat|fix|chore|hotfix)-[0-9]+):'
+
+          if [ "$EVENT_NAME" = "workflow_dispatch" ]; then
+            preview_id="$INPUT_PREVIEW_ID"
+
+            if [[ ! "$preview_id" =~ $preview_id_regex ]]; then
+              echo "::error::preview_id must match <type>-<number>, for example feat-001."
+              exit 1
+            fi
+          else
+            if [[ ! "$BRANCH_NAME" =~ $branch_regex ]]; then
+              echo "::error::Branch name must match <type>/<preview-id>-<short-description>, for example feat/feat-001-go-profile-intro."
+              exit 1
+            fi
+
+            branch_preview_id="${BASH_REMATCH[2]}"
+
+            if [[ ! "$PR_TITLE" =~ $title_regex ]]; then
+              echo "::error::PR title must start with <preview-id>:, for example feat-001: 接入 Go profile intro."
+              exit 1
+            fi
+
+            title_preview_id="${BASH_REMATCH[1]}"
+
+            if [[ "$branch_preview_id" != "$title_preview_id" ]]; then
+              echo "::error::Preview ID mismatch. Branch uses '$branch_preview_id' but PR title uses '$title_preview_id'."
+              exit 1
+            fi
+
+            preview_id="$branch_preview_id"
+          fi
+
+          if (( ${#preview_id} > 40 )); then
+            echo "::error::Preview ID is too long. Keep it at 40 characters or fewer."
+            exit 1
+          fi
+
+          short_sha="${COMMIT_SHA:0:7}"
+          image_tag="$INPUT_IMAGE_TAG"
+
+          if [ -z "$image_tag" ]; then
+            image_tag="$preview_id-$short_sha"
+          fi
+
+          if [[ ! "$image_tag" =~ ^[a-zA-Z0-9._-]{1,128}$ ]]; then
+            echo "::error::image_tag must be a valid Docker tag."
+            exit 1
+          fi
+
+          stack_name="token-query-preview-go-$preview_id"
+          service_name="token-query-go-pr-$preview_id"
+          service_origin="http://go-$preview_id.token-query.internal:8080"
+
+          {
+            echo "preview_id=$preview_id"
+            echo "stack_name=$stack_name"
+            echo "service_name=$service_name"
+            echo "service_origin=$service_origin"
+            echo "image_tag=$image_tag"
+            echo "short_sha=$short_sha"
+          } >> "$GITHUB_OUTPUT"
+
+          {
+            echo "PREVIEW_ID=$preview_id"
+            echo "STACK_NAME=$stack_name"
+            echo "SERVICE_NAME=$service_name"
+            echo "GO_SERVICE_ORIGIN=$service_origin"
+            echo "IMAGE_TAG=$image_tag"
+            echo "SOURCE_VERSION=$COMMIT_SHA"
+            echo "SHORT_SHA=$short_sha"
+          } >> "$GITHUB_ENV"
+
+      - name: Checkout
+        uses: actions/checkout@v6
+
+      - name: Setup pnpm
+        uses: pnpm/action-setup@v6
+        with:
+          version: 11.8.0
+
+      - name: Setup Node
+        uses: actions/setup-node@v6
+        with:
+          node-version: 22
+          cache: pnpm
+
+      - name: Install dependencies
+        run: pnpm install --frozen-lockfile
+
+      - name: Check deployment settings
+        env:
+          AWS_DEPLOY_ROLE_ARN: ${{ secrets.AWS_DEPLOY_ROLE_ARN }}
+        run: |
+          set -euo pipefail
+
+          test -n "$AWS_REGION"
+          test -n "$AWS_DEPLOY_ROLE_ARN"
+          test -n "$CODEBUILD_PROJECT_NAME"
+          test -n "$PREVIEW_ID"
+          test -n "$STACK_NAME"
+          test -n "$SERVICE_NAME"
+          test -n "$GO_SERVICE_ORIGIN"
+          test -n "$IMAGE_TAG"
+          test -n "$SOURCE_VERSION"
+
+      - name: Check CDK types
+        run: pnpm --filter @token-query/infra-cdk check-types
+
+      - name: Configure AWS credentials
+        uses: aws-actions/configure-aws-credentials@v6
+        with:
+          role-to-assume: ${{ secrets.AWS_DEPLOY_ROLE_ARN }}
+          aws-region: ${{ env.AWS_REGION }}
+
+      - name: Start CodeBuild image build
+        run: |
+          set -euo pipefail
+
+          build_id="$(
+            aws codebuild start-build \
+              --project-name "$CODEBUILD_PROJECT_NAME" \
+              --source-version "$SOURCE_VERSION" \
+              --environment-variables-override \
+                name=IMAGE_TAG,value="$IMAGE_TAG",type=PLAINTEXT \
+              --query 'build.id' \
+              --output text
+          )"
+
+          test -n "$build_id"
+          echo "CODEBUILD_BUILD_ID=$build_id" >> "$GITHUB_ENV"
+          echo "Started CodeBuild build: $build_id"
+
+      - name: Wait for CodeBuild image build
+        run: |
+          set -euo pipefail
+
+          while true; do
+            read -r status log_url <<< "$(
+              aws codebuild batch-get-builds \
+                --ids "$CODEBUILD_BUILD_ID" \
+                --query 'builds[0].[buildStatus,logs.deepLink]' \
+                --output text
+            )"
+
+            echo "CodeBuild status: $status"
+
+            case "$status" in
+              SUCCEEDED)
+                echo "CodeBuild succeeded: $log_url"
+                break
+                ;;
+              FAILED|FAULT|STOPPED|TIMED_OUT)
+                echo "::error::CodeBuild failed with status $status. Logs: $log_url"
+                exit 1
+                ;;
+              *)
+                sleep 15
+                ;;
+            esac
+          done
+
+      - name: Deploy Go preview stack
+        run: |
+          set -euo pipefail
+
+          CDK_STACK_SCOPE=go PREVIEW_ID="$PREVIEW_ID" PREVIEW_STACK_SCOPE=go pnpm --filter @token-query/infra-cdk cdk deploy "$STACK_NAME" \
+            --require-approval never \
+            --parameters "$STACK_NAME:ImageTag=$IMAGE_TAG"
+
+      - name: Comment Go preview result
+        if: github.event_name == 'pull_request'
+        uses: actions/github-script@v7
+        env:
+          STACK_NAME: ${{ env.STACK_NAME }}
+          SERVICE_NAME: ${{ env.SERVICE_NAME }}
+          GO_SERVICE_ORIGIN: ${{ env.GO_SERVICE_ORIGIN }}
+          PREVIEW_ID: ${{ env.PREVIEW_ID }}
+          IMAGE_TAG: ${{ env.IMAGE_TAG }}
+          SHORT_SHA: ${{ env.SHORT_SHA }}
+        with:
+          script: |
+            const marker = "<!-- token-query-go-preview -->";
+            const body = `${marker}
+            Go preview is ready.
+
+            Preview ID: \`${process.env.PREVIEW_ID}\`
+            Stack: \`${process.env.STACK_NAME}\`
+            ECS service: \`${process.env.SERVICE_NAME}\`
+            Image tag: \`${process.env.IMAGE_TAG}\`
+            Cloud Map origin: \`${process.env.GO_SERVICE_ORIGIN}\`
+            Commit: \`${process.env.SHORT_SHA}\``;
+
+            const { owner, repo } = context.repo;
+            const issue_number = context.issue.number;
+            const comments = await github.paginate(github.rest.issues.listComments, {
+              owner,
+              repo,
+              issue_number,
+              per_page: 100,
+            });
+            const existing = comments.find((comment) => comment.body?.includes(marker));
+
+            if (existing) {
+              await github.rest.issues.updateComment({
+                owner,
+                repo,
+                comment_id: existing.id,
+                body,
+              });
+            } else {
+              await github.rest.issues.createComment({
+                owner,
+                repo,
+                issue_number,
+                body,
+              });
+            }
+
+      - name: Write manual preview summary
+        if: github.event_name == 'workflow_dispatch'
+        run: |
+          {
+            echo "## Go preview"
+            echo
+            echo "Preview ID: \`$PREVIEW_ID\`"
+            echo "Stack: \`$STACK_NAME\`"
+            echo "ECS service: \`$SERVICE_NAME\`"
+            echo "Image tag: \`$IMAGE_TAG\`"
+            echo "Cloud Map origin: \`$GO_SERVICE_ORIGIN\`"
+          } >> "$GITHUB_STEP_SUMMARY"

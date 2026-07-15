@@ -167,7 +167,7 @@ bug-111-<commit-sha>
 Cloud Map service：
 
 ```text
-go-pr-bug-111
+go-bug-111
 ```
 
 PostgreSQL schema：

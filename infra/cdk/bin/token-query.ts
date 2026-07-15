@@ -6,6 +6,7 @@ import { FoundationStack } from "../lib/foundation-stack";
 import { GoStack } from "../lib/go-stack";
 import { PermissionsStack } from "../lib/permissions-stack";
 import { PreviewApiStack } from "../lib/preview-api-stack";
+import { PreviewGoStack } from "../lib/preview-go-stack";
 
 const app = new App();
 
@@ -14,18 +15,42 @@ const env = {
   region: process.env.CDK_DEFAULT_REGION ?? "us-west-2",
 };
 
-new PermissionsStack(app, "token-query-permissions", {
-  env,
-  synthesizer: new CliCredentialsStackSynthesizer(),
-});
-new FoundationStack(app, "token-query-foundation", { env });
-new ApiStack(app, "token-query-api", { env });
-new GoStack(app, "token-query-go", { env });
+const stackScope = process.env.CDK_STACK_SCOPE ?? "all";
+
+if (stackScope === "permissions" || stackScope === "all") {
+  new PermissionsStack(app, "token-query-permissions", {
+    env,
+    synthesizer: new CliCredentialsStackSynthesizer(),
+  });
+}
+
+if (stackScope === "foundation" || stackScope === "all") {
+  new FoundationStack(app, "token-query-foundation", { env });
+}
+
+if (stackScope === "api" || stackScope === "all") {
+  new ApiStack(app, "token-query-api", { env });
+}
+
+if (stackScope === "go" || stackScope === "all") {
+  new GoStack(app, "token-query-go", { env });
+}
 
 const previewId = process.env.PREVIEW_ID;
 if (previewId) {
-  new PreviewApiStack(app, `token-query-preview-api-${previewId}`, {
-    env,
-    previewId,
-  });
+  const previewStackScope = process.env.PREVIEW_STACK_SCOPE ?? stackScope;
+
+  if (previewStackScope === "api" || previewStackScope === "all") {
+    new PreviewApiStack(app, `token-query-preview-api-${previewId}`, {
+      env,
+      previewId,
+    });
+  }
+
+  if (previewStackScope === "go" || previewStackScope === "all") {
+    new PreviewGoStack(app, `token-query-preview-go-${previewId}`, {
+      env,
+      previewId,
+    });
+  }
 }
