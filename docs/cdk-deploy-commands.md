@@ -241,6 +241,31 @@ CDK_STACK_SCOPE=go PREVIEW_ID="$PREVIEW_ID" PREVIEW_STACK_SCOPE=go \
   --parameters "$STACK_NAME:ImageTag=$IMAGE_TAG"
 ```
 
+## 监控层（Synthetics canary）生产部署
+
+Monitoring stack 名称是 `token-query-monitoring`，包含两个独立的 CloudWatch Synthetics 心跳 canary：
+
+- `token-query-api-heartbeat`：探测公网 Lambda API 的 `https://api.doyouadoreme.online/health`，只断言 `ok === true`
+- `token-query-go-heartbeat`：探测内网 Go 服务的 `http://go.token-query.internal:8080/health`，只断言 `ok === true`
+
+两个 canary 故意拆开、各自独立断言、各自独立 CloudWatch Alarm（`token-query-api-heartbeat-failed` / `token-query-go-heartbeat-failed`）——这样任意一个失败时，从告警名字就能直接知道是 Lambda 挂了还是 Go 挂了，不需要再去翻 `failureReason` 判断。两个 canary 都跑在 foundation 层的私有子网里（VPC ID / 子网 ID 直接从 SSM 参数 `/token-query/foundation/vpc-id`、`/token-query/foundation/private-subnet-ids` 读取），Go canary 额外对 foundation 导出的 `go-security-group-id` 打了一条入站放行规则（tcp/8080，来源是 Go canary 自己的安全组）。
+
+Artifact 统一存到 Part 1 手工创建时用过的 S3 bucket（`cw-syn-results-707605822527-us-west-2`），CDK 只是复用它，不新建 bucket。
+
+```bash
+CDK_STACK_SCOPE=monitoring pnpm --filter @token-query/infra-cdk cdk diff token-query-monitoring
+CDK_STACK_SCOPE=monitoring pnpm --filter @token-query/infra-cdk cdk deploy token-query-monitoring --require-approval never
+```
+
+部署后确认两个 canary 都跑出 `PASSED`：
+
+```bash
+aws synthetics get-canary-runs --name token-query-api-heartbeat --region us-west-2 --max-results 1 --query 'CanaryRuns[0].Status'
+aws synthetics get-canary-runs --name token-query-go-heartbeat --region us-west-2 --max-results 1 --query 'CanaryRuns[0].Status'
+```
+
+看 canary 运行报告时，只能走控制台或 `aws s3 cp`（带凭证），不要直接拼公网 S3 HTTPS 直链——桶是私有的，裸链接一定会拿到 `AccessDenied`（详见 `docs/todayToDo.md` 里的踩坑记录）。
+
 ## 清理顺序
 
 按依赖反向删除，避免 foundation 资源仍被应用层引用：
@@ -252,6 +277,7 @@ CDK_STACK_SCOPE=api PREVIEW_ID=<preview-id> PREVIEW_STACK_SCOPE=api \
 CDK_STACK_SCOPE=go PREVIEW_ID=<preview-id> PREVIEW_STACK_SCOPE=go \
   pnpm --filter @token-query/infra-cdk cdk destroy token-query-preview-go-<preview-id>
 
+CDK_STACK_SCOPE=monitoring pnpm --filter @token-query/infra-cdk cdk destroy token-query-monitoring
 CDK_STACK_SCOPE=go pnpm --filter @token-query/infra-cdk cdk destroy token-query-go
 CDK_STACK_SCOPE=api pnpm --filter @token-query/infra-cdk cdk destroy token-query-api
 CDK_STACK_SCOPE=foundation pnpm --filter @token-query/infra-cdk cdk destroy token-query-foundation

@@ -4,6 +4,7 @@ import { App, CliCredentialsStackSynthesizer } from "aws-cdk-lib";
 import { ApiStack } from "../lib/api-stack";
 import { FoundationStack } from "../lib/foundation-stack";
 import { GoStack } from "../lib/go-stack";
+import { MonitoringStack } from "../lib/monitoring-stack";
 import { PermissionsStack } from "../lib/permissions-stack";
 import { PreviewApiStack } from "../lib/preview-api-stack";
 import { PreviewGoStack } from "../lib/preview-go-stack";
@@ -34,6 +35,10 @@ if (stackScope === "api" || stackScope === "all") {
 
 if (stackScope === "go" || stackScope === "all") {
   new GoStack(app, "token-query-go", { env });
+}
+
+if (stackScope === "monitoring" || stackScope === "all") {
+  new MonitoringStack(app, "token-query-monitoring", { env });
 }
 
 const previewId = process.env.PREVIEW_ID;
