@@ -70,7 +70,7 @@ app.use("/api/*", async (c, next) => {
 
 app.route("/api/admin", adminRoutes);
 app.route("/api/github", githubRoutes);
-app.route("/api/health", healthRoutes);
+app.route("/health", healthRoutes);
 
 app.get("/", (c) => {
   return c.text("OK");

@@ -124,7 +124,7 @@ CodeBuild 的首次合理使用点是：
 验收方式：
 
 ```bash
-curl https://<preview-id>.app.doyouadoreme.online/api/health
+curl https://<preview-id>.app.doyouadoreme.online/health
 ```
 
 期望看到：

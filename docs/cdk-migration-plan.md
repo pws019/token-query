@@ -348,9 +348,9 @@ GO_SERVICE_ORIGIN=http://go.token-query.internal:8080
 5. Deploy the foundation layer manually or through a controlled workflow.
 6. Implement the application layer for the current Lambda API.
 7. Deploy the application layer.
-8. Verify direct API Gateway access to `/api/health`.
+8. Verify direct API Gateway access to `/health`.
 9. Update Cloudflare Worker `LAMBDA_API_ORIGIN` to the new API endpoint.
-10. Verify `Cloudflare Worker -> Lambda -> /api/health`.
+10. Verify `Cloudflare Worker -> Lambda -> /health`.
 11. Verify Lambda database access.
 12. Verify Lambda outbound access to GitHub through NAT.
 13. Implement the application preview layer.

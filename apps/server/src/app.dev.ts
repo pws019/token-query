@@ -24,7 +24,7 @@ app.use(
 
 app.route("/api/admin", adminRoutes);
 app.route("/api/github", githubRoutes);
-app.route("/api/health", healthRoutes);
+app.route("/health", healthRoutes);
 
 app.use(
   "/trpc/*",
