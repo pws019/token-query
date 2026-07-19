@@ -21,6 +21,34 @@
   - role arn: arn:aws:iam::707605822527:role/service-role/CloudWatchSyntheticsRole-token-query-api-heart-c9d-489ed01ef234
   - s3 bucket: cw-syn-results-707605822527-us-west-2/canary/us-west-2/token-query-api-heartbeat-c9d-489ed01ef234
 
+## 排查笔记：CloudWatch Alarm 用 `Failed` metric 会假报警
+
+Part 2 CDK 里最初给两个 canary 的 Alarm 配的是：
+
+```ts
+metricName: "Failed",
+statistic: "Sum",
+comparisonOperator: "GreaterThanOrEqualToThreshold",
+threshold: 1,
+treatMissingData: "breaching",
+```
+
+部署后 canary 一直 PASSED，Alarm 却一直是 ALARM。查了 `Failed` metric 过去 3 小时的数据点——**0 个**，而 `SuccessPercent` metric 每次运行都稳定发 100.0。
+
+原因：CloudWatch Synthetics 只在 canary **真的失败**时才会发 `Failed` 这个 metric 的数据点，成功时不发（不是发 0，是压根不发）。`treatMissingData: "breaching"` 又把"没数据"当成"触发阈值"处理，于是每次成功（没有 `Failed` 数据点）反而被判定成报警。
+
+修复：改用 `SuccessPercent`（每次运行都会发数据，成功 100 / 失败 0，不存在缺数据的歧义）：
+
+```ts
+metricName: "SuccessPercent",
+statistic: "Average",
+comparisonOperator: "LessThanThreshold",
+threshold: 100,
+treatMissingData: "breaching",  // 这里保留合理：真没数据=canary 没跑起来，也该报警
+```
+
+这也是 AWS 官方文档给 Synthetics canary 配 Alarm 时的推荐 metric，之后新增类似 Alarm 直接照这个抄，不要再用 `Failed`。
+
 ## 排查笔记：查看 canary 运行报告的正确方式
 
 `cw-syn-results-707605822527-us-west-2` 是 Synthetics 自动创建的私有 S3 bucket，存放每次 run 的报告 / HAR / 截图。**不要直接在浏览器打开裸的 S3 HTTPS 直链**（形如

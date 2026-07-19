@@ -323,13 +323,17 @@ export class MonitoringStack extends Stack {
       alarmName: props.alarmName,
       alarmDescription: props.alarmDescription,
       namespace: "CloudWatchSynthetics",
-      metricName: "Failed",
+      // SuccessPercent publishes a datapoint on every run (100 or 0), unlike Failed,
+      // which Synthetics only emits when a run actually fails. Alarming on Failed with
+      // treatMissingData: breaching meant every successful run (no Failed datapoint)
+      // was itself treated as a threshold breach.
+      metricName: "SuccessPercent",
       dimensions: [{ name: "CanaryName", value: props.canaryName }],
-      statistic: "Sum",
+      statistic: "Average",
       period: 300,
       evaluationPeriods: 1,
-      threshold: 1,
-      comparisonOperator: "GreaterThanOrEqualToThreshold",
+      threshold: 100,
+      comparisonOperator: "LessThanThreshold",
       treatMissingData: "breaching",
     });
   }
