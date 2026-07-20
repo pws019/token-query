@@ -1,22 +1,15 @@
 name: Cleanup Worker Preview
 
 on:
+  # Intentionally no `paths` filter: see cleanup-lambda-preview.yml for why cleanup
+  # must run unconditionally on every PR close rather than mirror the deploy trigger's
+  # path filter. This is exactly the workflow that used to get skipped when a PR only
+  # touched backend paths but someone had manually deployed a Worker preview against it.
   pull_request:
     types:
       - closed
     branches:
       - main-v2
-    paths:
-      - "apps/web/**"
-      - "packages/env/**"
-      - "packages/ui/**"
-      - "package.json"
-      - "pnpm-lock.yaml"
-      - "pnpm-workspace.yaml"
-      - "turbo.json"
-      - ".github/workflows/deploy-worker-preview.yml"
-      - ".github/workflows/cleanup-worker-preview.yml"
-      - "docs/pr-preview-naming.md"
   workflow_dispatch:
     inputs:
       preview_id:

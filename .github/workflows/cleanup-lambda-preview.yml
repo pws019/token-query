@@ -1,24 +1,17 @@
 name: Cleanup Lambda Preview
 
 on:
+  # Intentionally no `paths` filter: this cleanup must run on every PR close
+  # regardless of which files changed, because a preview stack can exist even
+  # when this PR's diff never touched backend paths (e.g. someone manually
+  # workflow_dispatch'd a Lambda preview to cross-check against a frontend-only
+  # change). Each cleanup step below already no-ops when the stack doesn't exist,
+  # so running unconditionally costs a few extra seconds, not a false cleanup.
   pull_request:
     types:
       - closed
     branches:
       - main-v2
-    paths:
-      - "apps/server/**"
-      - "packages/api/**"
-      - "packages/db/**"
-      - "packages/env/**"
-      - "package.json"
-      - "pnpm-lock.yaml"
-      - "pnpm-workspace.yaml"
-      - "turbo.json"
-      - "infra/cdk/**"
-      - ".github/workflows/deploy-lambda-preview.yml"
-      - ".github/workflows/cleanup-lambda-preview.yml"
-      - "docs/pr-preview-naming.md"
   workflow_dispatch:
     inputs:
       preview_id:

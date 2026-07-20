@@ -1,18 +1,14 @@
 name: Cleanup Go Preview
 
 on:
+  # Intentionally no `paths` filter: see cleanup-lambda-preview.yml for why cleanup
+  # must run unconditionally on every PR close rather than mirror the deploy trigger's
+  # path filter.
   pull_request:
     types:
       - closed
     branches:
       - main-v2
-    paths:
-      - "apps/go-service/**"
-      - "infra/codebuild/**"
-      - "infra/cdk/**"
-      - ".github/workflows/deploy-go-preview.yml"
-      - ".github/workflows/cleanup-go-preview.yml"
-      - "docs/pr-preview-naming.md"
   workflow_dispatch:
     inputs:
       preview_id:
