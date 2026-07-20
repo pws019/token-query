@@ -34,6 +34,9 @@ pnpm --filter @token-query/infra-cdk cdk bootstrap aws://<account-id>/us-west-2
 | `foundation` | `token-query-foundation` |
 | `api` | `token-query-api` |
 | `go` | `token-query-go` |
+| `monitoring` | `token-query-monitoring` |
+| `preview-cleanup` | `token-query-preview-cleanup` |
+| `preview-reconciliation` | `token-query-preview-reconciliation` |
 | `all` 或未设置 | 以上生产 stack 全部 |
 
 Preview stack 需要额外设置 `PREVIEW_ID`，并可用 `PREVIEW_STACK_SCOPE` 选择 `api` 或 `go`。
@@ -252,9 +255,13 @@ Monitoring stack 名称是 `token-query-monitoring`，包含两个独立的 Clou
 
 Artifact 统一存到 Part 1 手工创建时用过的 S3 bucket（`cw-syn-results-707605822527-us-west-2`），CDK 只是复用它，不新建 bucket。
 
+这个 stack 还包含一个共用的 SNS Topic `token-query-ops-alerts`（`AlertEmail` 是必填参数，没有默认值，部署时必须传），两个 canary 的 Alarm 都挂在这个 Topic 上。部署命令：
+
 ```bash
 CDK_STACK_SCOPE=monitoring pnpm --filter @token-query/infra-cdk cdk diff token-query-monitoring
-CDK_STACK_SCOPE=monitoring pnpm --filter @token-query/infra-cdk cdk deploy token-query-monitoring --require-approval never
+CDK_STACK_SCOPE=monitoring pnpm --filter @token-query/infra-cdk cdk deploy token-query-monitoring \
+  --require-approval never \
+  --parameters token-query-monitoring:AlertEmail=<接收告警的邮箱>
 ```
 
 部署后确认两个 canary 都跑出 `PASSED`：
@@ -265,6 +272,74 @@ aws synthetics get-canary-runs --name token-query-go-heartbeat --region us-west-
 ```
 
 看 canary 运行报告时，只能走控制台或 `aws s3 cp`（带凭证），不要直接拼公网 S3 HTTPS 直链——桶是私有的，裸链接一定会拿到 `AccessDenied`（详见 `docs/todayToDo.md` 里的踩坑记录）。
+
+**首次部署后**，Email 订阅是 `PendingConfirmation` 状态，必须去邮箱点确认链接才能真的收到通知：
+
+```bash
+aws sns list-subscriptions-by-topic \
+  --topic-arn arn:aws:sns:us-west-2:707605822527:token-query-ops-alerts \
+  --region us-west-2 --query 'Subscriptions[*].{Endpoint:Endpoint,Status:SubscriptionArn}'
+```
+
+## PR Preview 清理兜底层（SQS + DLQ）生产部署
+
+Stack 名称是 `token-query-preview-cleanup`，依赖监控层导出的 SSM 参数 `/token-query/monitoring/ops-alerts-topic-arn`——**必须先部署 `token-query-monitoring`**，再部署这个 stack。完整流程图和排查笔记见 [docs/knowledge/preview-cleanup-flow.md](knowledge/preview-cleanup-flow.md)。
+
+这个 stack 给 `cleanup-lambda-preview.yml` / `cleanup-go-preview.yml` 的 `cdk destroy` 失败分支提供兜底：失败时那两个 workflow 会把 `{ stackName, previewId }` 发到这里的 SQS 队列，由一个 Lambda 消费者直接调 `cloudformation:DeleteStack` 重试；重试 3 次还失败会进死信队列，触发 Alarm 通知到上面 `token-query-ops-alerts` 这个 Topic。
+
+```bash
+CDK_STACK_SCOPE=preview-cleanup pnpm --filter @token-query/infra-cdk cdk diff token-query-preview-cleanup
+CDK_STACK_SCOPE=preview-cleanup pnpm --filter @token-query/infra-cdk cdk deploy token-query-preview-cleanup --require-approval never
+```
+
+部署后确认队列和 Alarm 都建好了：
+
+```bash
+aws sqs get-queue-url --queue-name token-query-preview-cleanup-queue --region us-west-2
+aws sqs get-queue-url --queue-name token-query-preview-cleanup-dlq --region us-west-2
+aws cloudwatch describe-alarms --alarm-names token-query-preview-cleanup-dlq-not-empty --region us-west-2 --query 'MetricAlarms[0].StateValue'
+```
+
+`GitHubActionsDeployRole` 需要 `sqs:SendMessage` / `sqs:GetQueueUrl` 权限才能在两个 cleanup workflow 里往这个队列发消息，这条权限在 `permissions-stack.ts` 里（`QueuePreviewCleanupRetries`），跟 `token-query-preview-cleanup` 是两个独立的栈，改动权限层要单独 `cdk deploy token-query-permissions`。
+
+## Preview 环境定时对账层（第二层兜底）生产部署
+
+Stack 名称是 `token-query-preview-reconciliation`，依赖 `token-query-preview-cleanup` 导出的 SSM 参数（`/token-query/preview-cleanup/queue-url`、`queue-arn`）——**必须先部署 `token-query-preview-cleanup`**。这是 Part 7 的第二层兜底：每天定时扫一遍 `token-query-preview-*` CFN 栈和 `token-query-pr-*` Cloudflare Worker，跟 GitHub 上仍然 open 的 PR 比对，孤儿 CFN 栈丢进上面那个 preview-cleanup 队列复用同一套重试/DLQ/告警，孤儿 Cloudflare Worker 直接调 API 删掉。完整设计和排查笔记见 [docs/knowledge/preview-cleanup-flow.md](knowledge/preview-cleanup-flow.md)。
+
+**部署前必须先手动创建两个 Secrets Manager 密钥**（这一步不由 CDK 管理，避免把凭证写进模板/仓库）：
+
+```bash
+# 一个只需要读 PR 权限的 fine-grained GitHub PAT
+aws secretsmanager create-secret \
+  --name token-query/reconciliation/github-token \
+  --secret-string '<你的 GitHub PAT>' \
+  --region us-west-2
+
+# 一个有 Workers Scripts:Read + Workers Scripts:Edit 权限的 Cloudflare API Token（Edit 是为了能删孤儿 Worker）
+aws secretsmanager create-secret \
+  --name token-query/reconciliation/cloudflare-api-token \
+  --secret-string '<你的 Cloudflare API Token>' \
+  --region us-west-2
+```
+
+部署时需要额外传 `CloudflareAccountId`（没有默认值）：
+
+```bash
+CDK_STACK_SCOPE=preview-reconciliation pnpm --filter @token-query/infra-cdk cdk diff token-query-preview-reconciliation
+CDK_STACK_SCOPE=preview-reconciliation pnpm --filter @token-query/infra-cdk cdk deploy token-query-preview-reconciliation \
+  --require-approval never \
+  --parameters token-query-preview-reconciliation:CloudflareAccountId=<你的 Cloudflare account id>
+```
+
+部署后可以手动触发一次看看效果，不用等第二天的定时调度：
+
+```bash
+aws lambda invoke --function-name token-query-preview-reconciliation --region us-west-2 /tmp/reconciliation-output.json
+cat /tmp/reconciliation-output.json
+
+# 看这次调用的日志，确认扫描到的栈/Worker/open PR 数量，以及有没有孤儿资源
+aws logs tail /aws/lambda/token-query-preview-reconciliation --region us-west-2 --since 5m
+```
 
 ## 清理顺序
 
@@ -277,6 +352,8 @@ CDK_STACK_SCOPE=api PREVIEW_ID=<preview-id> PREVIEW_STACK_SCOPE=api \
 CDK_STACK_SCOPE=go PREVIEW_ID=<preview-id> PREVIEW_STACK_SCOPE=go \
   pnpm --filter @token-query/infra-cdk cdk destroy token-query-preview-go-<preview-id>
 
+CDK_STACK_SCOPE=preview-reconciliation pnpm --filter @token-query/infra-cdk cdk destroy token-query-preview-reconciliation
+CDK_STACK_SCOPE=preview-cleanup pnpm --filter @token-query/infra-cdk cdk destroy token-query-preview-cleanup
 CDK_STACK_SCOPE=monitoring pnpm --filter @token-query/infra-cdk cdk destroy token-query-monitoring
 CDK_STACK_SCOPE=go pnpm --filter @token-query/infra-cdk cdk destroy token-query-go
 CDK_STACK_SCOPE=api pnpm --filter @token-query/infra-cdk cdk destroy token-query-api

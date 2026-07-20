@@ -265,6 +265,14 @@ export class PermissionsStack extends Stack {
 
     deployRole.addToPolicy(
       new iam.PolicyStatement({
+        sid: "QueuePreviewCleanupRetries",
+        actions: ["sqs:GetQueueUrl", "sqs:SendMessage"],
+        resources: [`arn:${this.partition}:sqs:${this.region}:${this.account}:token-query-preview-cleanup-queue`],
+      }),
+    );
+
+    deployRole.addToPolicy(
+      new iam.PolicyStatement({
         sid: "PassTokenQueryRolesToSupportedServices",
         actions: ["iam:PassRole"],
         resources: [`arn:${this.partition}:iam::${this.account}:role/token-query-*`],

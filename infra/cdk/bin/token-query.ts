@@ -7,7 +7,9 @@ import { GoStack } from "../lib/go-stack";
 import { MonitoringStack } from "../lib/monitoring-stack";
 import { PermissionsStack } from "../lib/permissions-stack";
 import { PreviewApiStack } from "../lib/preview-api-stack";
+import { PreviewCleanupStack } from "../lib/preview-cleanup-stack";
 import { PreviewGoStack } from "../lib/preview-go-stack";
+import { PreviewReconciliationStack } from "../lib/preview-reconciliation-stack";
 
 const app = new App();
 
@@ -39,6 +41,14 @@ if (stackScope === "go" || stackScope === "all") {
 
 if (stackScope === "monitoring" || stackScope === "all") {
   new MonitoringStack(app, "token-query-monitoring", { env });
+}
+
+if (stackScope === "preview-cleanup" || stackScope === "all") {
+  new PreviewCleanupStack(app, "token-query-preview-cleanup", { env });
+}
+
+if (stackScope === "preview-reconciliation" || stackScope === "all") {
+  new PreviewReconciliationStack(app, "token-query-preview-reconciliation", { env });
 }
 
 const previewId = process.env.PREVIEW_ID;

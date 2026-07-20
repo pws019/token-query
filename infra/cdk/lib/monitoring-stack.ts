@@ -6,6 +6,7 @@ import {
   aws_s3 as s3,
   aws_sns as sns,
   aws_sns_subscriptions as sns_subscriptions,
+  aws_ssm as ssm,
   aws_synthetics as synthetics,
 } from "aws-cdk-lib";
 import type { Construct } from "constructs";
@@ -158,6 +159,11 @@ export class MonitoringStack extends Stack {
     });
 
     opsAlertsTopic.addSubscription(new sns_subscriptions.EmailSubscription(alertEmail.valueAsString));
+
+    new ssm.StringParameter(this, "OpsAlertsTopicArnParam", {
+      parameterName: "/token-query/monitoring/ops-alerts-topic-arn",
+      stringValue: opsAlertsTopic.topicArn,
+    });
 
     const artifactsBucket = s3.Bucket.fromBucketName(
       this,

@@ -118,6 +118,21 @@ jobs:
           CDK_STACK_SCOPE=go PREVIEW_ID="$PREVIEW_ID" PREVIEW_STACK_SCOPE=go pnpm --filter @token-query/infra-cdk cdk destroy "$STACK_NAME" --force
           echo "go_cleanup_status=deleted" >> "$GITHUB_OUTPUT"
 
+      - name: Queue retry on cleanup failure
+        if: failure() && steps.go_cleanup.outcome == 'failure'
+        run: |
+          set -euo pipefail
+
+          queue_url="$(aws sqs get-queue-url --queue-name token-query-preview-cleanup-queue --region "$AWS_REGION" --query QueueUrl --output text)"
+          message_body="$(jq -n --arg stackName "$STACK_NAME" --arg previewId "$PREVIEW_ID" '{stackName: $stackName, previewId: $previewId}')"
+
+          aws sqs send-message \
+            --queue-url "$queue_url" \
+            --message-body "$message_body" \
+            --region "$AWS_REGION"
+
+          echo "::warning::cdk destroy failed for $STACK_NAME. Queued a retry via token-query-preview-cleanup-queue."
+
       - name: Comment cleanup result
         if: always() && github.event_name == 'pull_request'
         continue-on-error: true
