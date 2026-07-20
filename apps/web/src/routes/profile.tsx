@@ -157,7 +157,7 @@ export default function Profile() {
                 </div>
                 <div className="min-w-0">
                   <h1 className="text-[20px] font-semibold leading-[26px] text-[#181c23]">
-                    连接 GitHub 账户
+                    连接 GitHub 账户哦
                   </h1>
                   <p className="mt-1 text-[15px] leading-[22px] text-[#5d5e63]">
                     输入 GitHub Token，查询当前账户资料并保存到数据库。
