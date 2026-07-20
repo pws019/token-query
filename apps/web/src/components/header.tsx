@@ -7,7 +7,7 @@ export default function Header() {
   return (
     <header className="sticky top-0 z-20 border-b border-[#c1c6d7]/55 bg-white/90 text-[#181c23] backdrop-blur-xl">
       <div className="mx-auto flex min-h-16 w-full max-w-[1200px] items-center justify-between gap-4 px-5 sm:px-8">
-        <NavLink to="/profile" className="flex min-w-0 flex-1 items-center gap-3" end>
+        <NavLink to="/" className="flex min-w-0 flex-1 items-center gap-3" end>
           <div className="flex size-10 shrink-0 items-center justify-center rounded-xl bg-[#d8e2ff] text-[#0058bc]">
             <UserRound className="size-5" />
           </div>
@@ -22,13 +22,6 @@ export default function Header() {
         </NavLink>
 
         <nav className="flex items-center gap-2">
-          <NavLink
-            to="/"
-            className="inline-flex h-10 shrink-0 items-center justify-center rounded-xl border border-[#c1c6d7]/70 bg-[#f9f9ff] px-3 text-[13px] font-medium leading-[18px] text-[#414755] transition-all hover:border-[#0058bc]/35 hover:bg-[#f1f3fe] hover:text-[#0058bc] active:scale-[0.98]"
-            end
-          >
-            架构图
-          </NavLink>
           <ModeToggle />
         </nav>
       </div>

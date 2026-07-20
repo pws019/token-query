@@ -1,268 +1,508 @@
-import { NavLink } from "react-router";
+import { Button } from "@token-query/ui/components/button";
+import { Input } from "@token-query/ui/components/input";
+import {
+  AtSign,
+  BookOpen,
+  ExternalLink,
+  GitBranch,
+  IdCard,
+  KeyRound,
+  LoaderCircle,
+  ShieldCheck,
+  Sparkles,
+  Trash2,
+  UserRound,
+  Users,
+} from "lucide-react";
+import type { ReactNode } from "react";
+import { useState } from "react";
+
+import Header from "../components/header";
 
 import type { Route } from "./+types/_index";
-import styles from "../styles/architecture.module.css";
+
+type GithubProfile = {
+  githubId: number;
+  login: string;
+  name: string | null;
+  avatarUrl: string | null;
+  htmlUrl: string | null;
+  bio: string | null;
+  publicRepos: number;
+  followers: number;
+  following: number;
+};
+
+const queryFailedError = "GitHub information query failed. Please check your token.";
+const introFailedError = "Self introduction generation failed. Please try again.";
 
 export function meta({}: Route.MetaArgs) {
   return [
-    { title: "架构图 - token-query" },
-    { name: "description", content: "从浏览器到 Aurora：Cloudflare 与 AWS 之间的运行时架构" },
+    { title: "个人信息 - token-query" },
+    { name: "description", content: "查询并保存 GitHub 个人信息" },
   ];
 }
 
-function cx(...classNames: Array<string | false | undefined>) {
-  return classNames.filter(Boolean).join(" ");
+export default function Index() {
+  const [token, setToken] = useState("");
+  const [profile, setProfile] = useState<GithubProfile | null>(null);
+  const [error, setError] = useState("");
+  const [message, setMessage] = useState("");
+  const [intro, setIntro] = useState("");
+  const [introError, setIntroError] = useState("");
+  const [isQuerying, setIsQuerying] = useState(false);
+  const [isDeleting, setIsDeleting] = useState(false);
+  const [isGeneratingIntro, setIsGeneratingIntro] = useState(false);
+
+  async function queryProfile() {
+    setError("");
+    setMessage("");
+    setIntro("");
+    setIntroError("");
+    setIsQuerying(true);
+
+    try {
+      const response = await fetch("/api/github/profile", {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify({ token }),
+      });
+      const result = await response.json();
+
+      if (!response.ok || !result.profile) {
+        throw new Error(result.error || queryFailedError);
+      }
+
+      setProfile(result.profile);
+      setMessage("查询成功。");
+    } catch (err) {
+      setError(err instanceof Error ? err.message : queryFailedError);
+    } finally {
+      setIsQuerying(false);
+    }
+  }
+
+  async function deleteProfile() {
+    setError("");
+    setMessage("");
+    setIntro("");
+    setIntroError("");
+    setIsDeleting(true);
+
+    try {
+      const response = await fetch("/api/github/profile", {
+        method: "DELETE",
+      });
+      const result = await response.json();
+
+      if (!response.ok || !result.success) {
+        throw new Error(result.error || "Delete failed. Please try again.");
+      }
+
+      setProfile(null);
+      setMessage("Deleted successfully.");
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Delete failed. Please try again.");
+    } finally {
+      setIsDeleting(false);
+    }
+  }
+
+  async function generateIntro() {
+    if (!profile) {
+      return;
+    }
+
+    setIntro("");
+    setIntroError("");
+    setIsGeneratingIntro(true);
+
+    try {
+      const response = await fetch("/api/github/profile/intro", {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify({ githubId: profile.githubId }),
+      });
+      const result = await response.json();
+
+      if (!response.ok || typeof result.intro !== "string") {
+        throw new Error(result.error || introFailedError);
+      }
+
+      setIntro(result.intro);
+    } catch (err) {
+      setIntroError(err instanceof Error ? err.message : introFailedError);
+    } finally {
+      setIsGeneratingIntro(false);
+    }
+  }
+
+  const isBusy = isQuerying || isDeleting || isGeneratingIntro;
+
+  return (
+    <div className="flex h-svh flex-col">
+      <Header />
+      <main className="min-h-0 flex-1 overflow-y-auto bg-[#f9f9ff] text-[#181c23]">
+      <div className="mx-auto grid w-full max-w-[1200px] gap-6 px-5 py-6 sm:px-8 lg:grid-cols-[minmax(0,1fr)_320px] lg:py-8">
+        <section className="min-w-0 space-y-6">
+          <div className="rounded-2xl border border-[#c1c6d7] bg-white p-5 sm:p-6">
+            <div className="flex flex-col gap-5">
+              <div className="flex items-start gap-4">
+                <div className="flex size-11 shrink-0 items-center justify-center rounded-2xl bg-[#d8e2ff] text-[#0058bc]">
+                  <GitBranch className="size-5" />
+                </div>
+                <div className="min-w-0">
+                  <h1 className="text-[20px] font-semibold leading-[26px] text-[#181c23]">
+                    连接 GitHub 账户哦
+                  </h1>
+                  <p className="mt-1 text-[15px] leading-[22px] text-[#5d5e63]">
+                    输入 GitHub Token，查询当前账户资料并保存到数据库。
+                  </p>
+                </div>
+              </div>
+
+              <div className="grid gap-3 sm:grid-cols-[minmax(0,1fr)_auto_auto]">
+                <div className="relative min-w-0">
+                  <KeyRound className="pointer-events-none absolute left-4 top-1/2 size-4 -translate-y-1/2 text-[#717786]" />
+                  <Input
+                    id="github-token"
+                    type="password"
+                    value={token}
+                    placeholder="Enter your GitHub Token..."
+                    autoComplete="off"
+                    disabled={isBusy}
+                    className="h-12 rounded-xl border-0 bg-[#f1f3fe] pl-11 pr-4 text-[15px] leading-[22px] text-[#181c23] placeholder:text-[#717786] focus-visible:border-[#0058bc] focus-visible:ring-2 focus-visible:ring-[#0058bc]/20"
+                    onChange={(event) => setToken(event.target.value)}
+                  />
+                </div>
+
+                <Button
+                  disabled={isBusy || !token.trim()}
+                  className="h-12 rounded-xl bg-[#0058bc] px-5 text-[13px] font-medium leading-[18px] text-white transition-all hover:bg-[#0070eb] active:scale-[0.98]"
+                  onClick={queryProfile}
+                >
+                  {isQuerying ? (
+                    <>
+                      <LoaderCircle className="size-4 animate-spin" />
+                      查询中...
+                    </>
+                  ) : (
+                    "查询"
+                  )}
+                </Button>
+
+                <Button
+                  disabled={isBusy || profile === null}
+                  variant="destructive"
+                  className="h-12 rounded-xl bg-[#ffdad6] px-5 text-[13px] font-medium leading-[18px] text-[#93000a] transition-all hover:bg-[#ffcbc5] active:scale-[0.98]"
+                  onClick={deleteProfile}
+                >
+                  {isDeleting ? (
+                    <>
+                      <LoaderCircle className="size-4 animate-spin" />
+                      删除中...
+                    </>
+                  ) : (
+                    <>
+                      <Trash2 className="size-4" aria-hidden="true" />
+                      删除
+                    </>
+                  )}
+                </Button>
+              </div>
+
+              {error && (
+                <div className="rounded-xl border border-[#ffdad6] bg-[#fff3f1] px-4 py-3 text-[13px] font-medium leading-[18px] text-[#93000a]">
+                  {error}
+                </div>
+              )}
+              {message && (
+                <div className="rounded-xl border border-[#c1c6d7]/70 bg-[#f1f3fe] px-4 py-3 text-[13px] font-medium leading-[18px] text-[#0058bc]">
+                  {message}
+                </div>
+              )}
+            </div>
+          </div>
+
+          {profile ? (
+            <>
+              <IntroPanel
+                intro={intro}
+                error={introError}
+                isGenerating={isGeneratingIntro}
+                onGenerate={generateIntro}
+              />
+              <ProfileCard profile={profile} />
+            </>
+          ) : (
+            <StatePanel
+              icon={<UserRound className="size-5" />}
+              title="尚未查询个人信息"
+              description="输入 GitHub Token 并点击查询后，这里会展示账户资料。"
+            />
+          )}
+        </section>
+
+        <aside className="space-y-4">
+          <div className="rounded-2xl border border-[#c1c6d7] bg-white p-5">
+            <div className="flex items-center gap-3">
+              <div className="flex size-10 shrink-0 items-center justify-center rounded-xl bg-[#ecedf9] text-[#0058bc]">
+                <ShieldCheck className="size-5" />
+              </div>
+              <div>
+                <h2 className="text-[15px] font-semibold leading-[22px] text-[#181c23]">
+                  Token 仅用于查询
+                </h2>
+                <p className="mt-1 text-[13px] leading-[18px] text-[#5d5e63]">
+                  Token 不会写入数据库，接口只保存 GitHub 返回的公开账户字段。
+                </p>
+              </div>
+            </div>
+          </div>
+
+          <div className="rounded-2xl border border-[#c1c6d7] bg-white p-5">
+            <p className="text-[11px] font-semibold uppercase leading-[14px] text-[#717786]">
+              Current result
+            </p>
+            <p className="mt-3 text-[28px] font-semibold leading-[34px] text-[#181c23]">
+              {profile === null ? "Waiting" : "Ready"}
+            </p>
+            <p className="mt-1 text-[13px] leading-[18px] text-[#5d5e63]">
+              {profile === null ? "当前页面还没有查询结果。" : `@${profile.login} 已查询完成。`}
+            </p>
+          </div>
+        </aside>
+      </div>
+      </main>
+    </div>
+  );
 }
 
-export default function Index() {
+function IntroPanel({
+  intro,
+  error,
+  isGenerating,
+  onGenerate,
+}: {
+  intro: string;
+  error: string;
+  isGenerating: boolean;
+  onGenerate: () => void;
+}) {
   return (
-    <div className={styles.archRoot}>
-      <div className={styles.page}>
-        <header className={styles.top}>
-          <div className={styles.topBar}>
-            <p className={styles.eyebrow}>token-query // runtime architecture</p>
-            <NavLink to="/profile" className={styles.navLink}>
-              → profile
-            </NavLink>
-          </div>
-          <h1>From browser to Aurora, through Cloudflare and AWS</h1>
-          <p>
-            One request&apos;s path: the frontend is served and rendered by Cloudflare, proxied to
-            an AWS-hosted API, and answered by a Lambda function that lives inside a private VPC
-            alongside Aurora PostgreSQL. Four independent CloudFormation stacks provision the AWS
-            half; only one of them deploys automatically.
-          </p>
-        </header>
-
-        <div className={styles.pipeline}>
-          {/* CLIENT */}
-          <div className={cx(styles.zone, styles.client)}>
-            <div className={styles.zoneHead}>
-              <h2>
-                <span className={styles.dot} />
-                browser
+    <div className="rounded-2xl border border-[#c1c6d7] bg-white p-5 sm:p-6">
+      <div className="flex flex-col gap-4 sm:flex-row sm:items-start sm:justify-between">
+        <div className="min-w-0">
+          <div className="flex items-center gap-3">
+            <div className="flex size-10 shrink-0 items-center justify-center rounded-xl bg-[#d8e2ff] text-[#0058bc]">
+              <Sparkles className="size-5" />
+            </div>
+            <div>
+              <h2 className="text-[16px] font-semibold leading-[22px] text-[#181c23]">
+                自我介绍
               </h2>
-              <span className={styles.where}>user&apos;s device</span>
-            </div>
-            <div className={styles.box}>
-              <p className={styles.name}>app.doyouadoreme.online</p>
-              <p className={styles.desc}>
-                Requests the page, then calls the API for data — both routed through Cloudflare.
-              </p>
-            </div>
-          </div>
-
-          <div className={styles.arrowConnector}>
-            <div className={styles.line}>
-              <span className={styles.pulse} style={{ animationDelay: "0s" }} />
-            </div>
-            <span className={styles.label}>HTTPS</span>
-            <div className={styles.arrowhead} />
-          </div>
-
-          {/* CLOUDFLARE */}
-          <div className={cx(styles.zone, styles.cloudflare)}>
-            <div className={styles.zoneHead}>
-              <h2>
-                <span className={styles.dot} />
-                cloudflare
-              </h2>
-              <span className={styles.where}>Pages + Worker</span>
-            </div>
-            <div className={cx(styles.row, styles.cols2)}>
-              <div className={cx(styles.box, styles.accentCf)}>
-                <p className={styles.name}>Pages</p>
-                <p className={styles.desc}>Hosts and serves the built frontend assets.</p>
-              </div>
-              <div className={cx(styles.box, styles.accentCf)}>
-                <p className={styles.name}>
-                  Worker <span className={styles.badge}>SSR + proxy</span>
-                </p>
-                <p className={styles.desc}>
-                  Server-renders the frontend, then proxies API calls onward using a shared secret.
-                </p>
-              </div>
-            </div>
-            <div className={styles.certStrip}>
-              <span className={styles.mono}>X-Internal-Proxy-Token</span>
-              <span>
-                — shared secret attached to every request the Worker forwards to AWS; the Lambda
-                rejects anything without it.
-              </span>
-            </div>
-          </div>
-
-          <div className={styles.arrowConnector}>
-            <div className={styles.line}>
-              <span className={styles.pulse} style={{ animationDelay: "0.5s" }} />
-            </div>
-            <span className={styles.label}>LAMBDA_API_ORIGIN</span>
-            <div className={styles.arrowhead} />
-          </div>
-
-          {/* EDGE / DNS / CERT */}
-          <div className={cx(styles.zone, styles.edge)}>
-            <div className={styles.zoneHead}>
-              <h2>
-                <span className={styles.dot} />
-                dns + tls handoff
-              </h2>
-              <span className={styles.where}>api.doyouadoreme.online</span>
-            </div>
-            <div className={cx(styles.row, styles.cols2)}>
-              <div className={cx(styles.box, styles.accentFlow)}>
-                <p className={styles.name}>Cloudflare CNAME</p>
-                <p className={styles.desc}>
-                  Manually kept in sync — points at API Gateway&apos;s regional target, which
-                  changes if the API stack is ever rebuilt.
-                </p>
-              </div>
-              <div className={cx(styles.box, styles.accentFlow)}>
-                <p className={styles.name}>ACM Certificate</p>
-                <p className={styles.desc}>
-                  DNS-validated TLS cert for the custom domain. Can&apos;t be managed by
-                  CloudFormation — referenced by ARN only.
-                </p>
-              </div>
-            </div>
-          </div>
-
-          <div className={styles.arrowConnector}>
-            <div className={styles.line}>
-              <span className={styles.pulse} style={{ animationDelay: "1s" }} />
-            </div>
-            <span className={styles.label}>HTTPS · custom domain mapping</span>
-            <div className={styles.arrowhead} />
-          </div>
-
-          {/* AWS */}
-          <div className={cx(styles.zone, styles.aws)}>
-            <div className={styles.zoneHead}>
-              <h2>
-                <span className={styles.dot} />
-                aws · us-west-2
-              </h2>
-              <span className={styles.where}>token-query-api</span>
-            </div>
-
-            <div className={cx(styles.box, styles.accentAws)}>
-              <p className={styles.name}>
-                HTTP API <span className={styles.badge}>token-query-http-api</span>
-              </p>
-              <p className={styles.desc}>
-                API Gateway v2, single ANY /{"{proxy+}"} route forwarding straight to Lambda
-                inside the VPC below.
-              </p>
-            </div>
-
-            <div className={styles.vpcFrame}>
-              <p className={styles.vpcLabel}>token-query-vpc — 10.0.0.0/16</p>
-              <div className={styles.subnetRow}>
-                <div className={cx(styles.subnet, styles.public)}>
-                  <p className={styles.subnetTitle}>public subnet</p>
-                  <div className={styles.box}>
-                    <p className={styles.name}>NAT Gateway</p>
-                    <p className={styles.desc}>
-                      Only egress path out of the private subnets — every outbound call from
-                      Lambda passes through here.
-                    </p>
-                  </div>
-                </div>
-                <div className={cx(styles.subnet, styles.private)}>
-                  <p className={styles.subnetTitle}>private subnets ×2</p>
-                  <div className={cx(styles.box, styles.accentAws)}>
-                    <p className={styles.name}>
-                      Lambda <span className={styles.badge}>token-query-function</span>
-                    </p>
-                    <p className={styles.desc}>
-                      Hono app, Node.js 22 arm64 — its ENIs live inside these subnets.
-                    </p>
-                  </div>
-                  <div className={styles.innerLink}>
-                    <span className={styles.stub} />
-                    <span className={styles.tag}>5432/tcp · via security group</span>
-                  </div>
-                  <div className={cx(styles.box, styles.accentDb)}>
-                    <p className={styles.name}>
-                      Aurora PostgreSQL <span className={styles.badge}>serverless v2</span>
-                    </p>
-                    <p className={styles.desc}>
-                      token-query-db · 0.5–2 ACU, reachable only from the Lambda security group.
-                    </p>
-                  </div>
-                </div>
-              </div>
-            </div>
-          </div>
-
-          <div className={styles.branchConnector}>
-            <span className={styles.fromTag}>↳ branching off Lambda</span>
-            <span className={styles.branchLine} />
-            <span className={styles.branchLabel}>
-              via NAT · outbound 443 · <span className={styles.mono}>GET /user</span>
-            </span>
-            <span className={styles.branchArrowhead} />
-          </div>
-
-          {/* GITHUB (external, outbound business call) */}
-          <div className={cx(styles.zone, styles.github)}>
-            <div className={styles.zoneHead}>
-              <h2>
-                <span className={styles.dot} />
-                github <span className={styles.badge}>external</span>
-              </h2>
-              <span className={styles.where}>api.github.com</span>
-            </div>
-            <div className={styles.box}>
-              <p className={styles.name}>GET /user</p>
-              <p className={styles.desc}>
-                <span className={styles.mono}>POST /api/github/profile</span> — Lambda takes a
-                caller-supplied token, fetches the profile through the NAT Gateway, then upserts it
-                into <span className={styles.mono}>github_profiles</span> on Aurora (above) and
-                returns it to the caller.
+              <p className="mt-1 text-[13px] leading-[18px] text-[#5d5e63]">
+                根据当前账户资料生成一句简短介绍。
               </p>
             </div>
           </div>
         </div>
 
-        {/* IaC LAYER */}
-        <section className={styles.iac}>
-          <h2>Infrastructure as code — four stacks</h2>
-          <p className={styles.iacSub}>
-            Each layer publishes its live values to SSM Parameter Store; the layer above reads
-            them fresh on every deploy — no hand-copied IDs.
-          </p>
+        <Button
+          disabled={isGenerating}
+          className="h-11 shrink-0 rounded-xl bg-[#0058bc] px-4 text-[13px] font-medium leading-[18px] text-white transition-all hover:bg-[#0070eb] active:scale-[0.98]"
+          onClick={onGenerate}
+        >
+          {isGenerating ? (
+            <>
+              <LoaderCircle className="size-4 animate-spin" />
+              生成中...
+            </>
+          ) : (
+            "生成自我介绍"
+          )}
+        </Button>
+      </div>
 
-          <div className={styles.stackRow}>
-            <div className={cx(styles.stack, styles.manual)}>
-              <p className={styles.stackName}>token-query-iam</p>
-              <p className={styles.stackDesc}>
-                GitHub OIDC provider, deploy role, Lambda execution role.
+      {error && (
+        <div className="mt-4 rounded-xl border border-[#ffdad6] bg-[#fff3f1] px-4 py-3 text-[13px] font-medium leading-[18px] text-[#93000a]">
+          {error}
+        </div>
+      )}
+
+      {intro && (
+        <div className="mt-4 rounded-xl border border-[#c1c6d7]/70 bg-[#f1f3fe] px-4 py-3 text-[13px] font-medium leading-[18px] text-[#0058bc]">
+          <span className="font-semibold">查询成功：</span>
+          {intro}
+        </div>
+      )}
+    </div>
+  );
+}
+
+function ProfileCard({ profile }: { profile: GithubProfile }) {
+  const displayName = profile.name || profile.login;
+
+  return (
+    <div className="overflow-hidden rounded-2xl border border-[#c1c6d7] bg-white">
+      <div className="border-b border-[#c1c6d7]/60 bg-[#f1f3fe] p-5 sm:p-6">
+        <div className="flex flex-col gap-5 sm:flex-row sm:items-center sm:justify-between">
+          <div className="flex min-w-0 items-center gap-4">
+            {profile.avatarUrl ? (
+              <img
+                src={profile.avatarUrl}
+                alt={`${profile.login} avatar`}
+                className="size-20 rounded-full border border-white object-cover ring-1 ring-[#c1c6d7]"
+              />
+            ) : (
+              <div className="flex size-20 items-center justify-center rounded-full bg-white text-[#0058bc] ring-1 ring-[#c1c6d7]">
+                <UserRound className="size-8" />
+              </div>
+            )}
+
+            <div className="min-w-0">
+              <h2 className="truncate text-[24px] font-semibold leading-[30px] text-[#181c23]">
+                {displayName}
+              </h2>
+              <p className="mt-1 flex items-center gap-2 text-[15px] leading-[22px] text-[#5d5e63]">
+                <AtSign className="size-4" />
+                {profile.login}
               </p>
-              <p className={styles.stackTag}>→ /token-query/iam/*</p>
-            </div>
-            <div className={cx(styles.stack, styles.manual)}>
-              <p className={styles.stackName}>token-query-network</p>
-              <p className={styles.stackDesc}>
-                VPC, subnets, routing, NAT, Lambda security group.
-              </p>
-              <p className={styles.stackTag}>→ /token-query/network/*</p>
-            </div>
-            <div className={cx(styles.stack, styles.manual)}>
-              <p className={styles.stackName}>token-query-db</p>
-              <p className={styles.stackDesc}>
-                DB security group, subnet group, Aurora cluster + instance.
-              </p>
-              <p className={styles.stackTag}>→ /token-query/db/*</p>
-            </div>
-            <div className={cx(styles.stack, styles.ci)}>
-              <p className={styles.stackName}>token-query-api</p>
-              <p className={styles.stackDesc}>Lambda, HTTP API, custom domain mapping.</p>
-              <p className={styles.stackTag}>reads all three ↑</p>
             </div>
           </div>
-        </section>
+
+          {profile.htmlUrl && (
+            <a
+              href={profile.htmlUrl}
+              target="_blank"
+              rel="noopener noreferrer"
+              className="inline-flex h-10 shrink-0 items-center justify-center gap-2 rounded-xl bg-white px-3 text-[13px] font-medium leading-[18px] text-[#0058bc] ring-1 ring-[#c1c6d7] transition-all hover:bg-[#f9f9ff] active:scale-[0.98]"
+            >
+              Open GitHub
+              <ExternalLink className="size-4" />
+            </a>
+          )}
+        </div>
       </div>
+
+      <div className="grid gap-4 p-5 sm:grid-cols-3 sm:p-6">
+        <MetricCard
+          icon={<BookOpen className="size-4" />}
+          label="Public Repos"
+          value={profile.publicRepos}
+        />
+        <MetricCard
+          icon={<Users className="size-4" />}
+          label="Followers"
+          value={profile.followers}
+        />
+        <MetricCard
+          icon={<UserRound className="size-4" />}
+          label="Following"
+          value={profile.following}
+        />
+      </div>
+
+      <dl className="grid grid-cols-1 gap-4 border-t border-[#c1c6d7]/60 p-5 sm:grid-cols-2 sm:p-6">
+        <FieldItem
+          icon={<IdCard className="size-4" />}
+          label="GitHub ID"
+          value={profile.githubId}
+        />
+        <FieldItem icon={<AtSign className="size-4" />} label="Login" value={profile.login} />
+        <FieldItem
+          className="sm:col-span-2"
+          icon={<ExternalLink className="size-4" />}
+          label="Profile URL"
+          value={profile.htmlUrl}
+          href={profile.htmlUrl}
+        />
+        <FieldItem
+          className="sm:col-span-2"
+          icon={<UserRound className="size-4" />}
+          label="Bio"
+          value={profile.bio && profile.bio.length > 0 ? profile.bio : null}
+        />
+      </dl>
+    </div>
+  );
+}
+
+function StatePanel({
+  icon,
+  title,
+  description,
+}: {
+  icon: ReactNode;
+  title: string;
+  description: string;
+}) {
+  return (
+    <div className="flex min-h-72 items-center justify-center rounded-2xl border border-[#c1c6d7] bg-white p-8 text-center">
+      <div className="max-w-sm">
+        <div className="mx-auto flex size-12 items-center justify-center rounded-2xl bg-[#d8e2ff] text-[#0058bc]">
+          {icon}
+        </div>
+        <h2 className="mt-4 text-[20px] font-semibold leading-[26px] text-[#181c23]">{title}</h2>
+        <p className="mt-2 text-[15px] leading-[22px] text-[#5d5e63]">{description}</p>
+      </div>
+    </div>
+  );
+}
+
+function MetricCard({ icon, label, value }: { icon: ReactNode; label: string; value: number }) {
+  return (
+    <div className="rounded-2xl border border-[#c1c6d7]/70 bg-[#f9f9ff] p-4">
+      <div className="flex items-center gap-2 text-[#5d5e63]">
+        {icon}
+        <span className="text-[13px] font-medium leading-[18px]">{label}</span>
+      </div>
+      <p className="mt-3 text-[28px] font-semibold leading-[34px] text-[#181c23]">{value}</p>
+    </div>
+  );
+}
+
+function FieldItem({
+  icon,
+  label,
+  value,
+  href,
+  className = "",
+}: {
+  icon: ReactNode;
+  label: string;
+  value: number | string | null;
+  href?: string | null;
+  className?: string;
+}) {
+  const empty = value === null || value === "";
+
+  return (
+    <div className={`rounded-2xl border border-[#c1c6d7]/70 bg-white p-4 ${className}`}>
+      <dt className="flex items-center gap-2 text-[13px] font-medium leading-[18px] text-[#5d5e63]">
+        <span className="text-[#717786]">{icon}</span>
+        {label}
+      </dt>
+      <dd className="mt-2 break-words text-[15px] font-medium leading-[22px] text-[#181c23]">
+        {empty ? (
+          <span className="text-[#717786]">Not provided</span>
+        ) : href ? (
+          <a
+            href={href}
+            target="_blank"
+            rel="noopener noreferrer"
+            className="text-[#0058bc] transition-colors hover:text-[#0070eb]"
+          >
+            {value}
+          </a>
+        ) : (
+          value
+        )}
+      </dd>
     </div>
   );
 }
