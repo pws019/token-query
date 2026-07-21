@@ -2,6 +2,8 @@
 
 对应 [docs/todayToDo.md](../todayToDo.md) Part 6，代码在 `infra/cdk/lib/preview-cleanup-stack.ts`。这份文档记录整条链路怎么走，方便以后 review 或者排查问题时不用重新读一遍代码。
 
+> 这只是整个巡检体系里的"第二层"。如果想看心跳探测、告警通知、每日对账三层怎么串成一个整体（含架构图和时序图），见 [monitoring-architecture-upgrade.md](monitoring-architecture-upgrade.md)。
+
 > **状态**：三个栈（`token-query-monitoring` 的 SSM 导出、`token-query-permissions` 的新权限、全新的 `token-query-preview-cleanup`）已经 `cdk deploy` 完成（2026-07-20）。验证测试 A 进行中，测试 B / 告警确认 / 补充部署文档还没做，进度见文末「验证流程」。
 
 ## 整体流程图
