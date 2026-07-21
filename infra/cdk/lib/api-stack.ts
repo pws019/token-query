@@ -99,13 +99,16 @@ export class ApiStack extends Stack {
       retentionInDays: 14,
     });
 
+    // 从本地的server/dist目录里拿到路径。
     const serverDistPath = path.join(path.dirname(fileURLToPath(import.meta.url)), "../../../apps/server/dist");
+    // 提取这个代码，上传到s3存储上
     const functionCode = lambda.Code.fromAsset(serverDistPath).bind(this);
 
     if (!functionCode.s3Location) {
       throw new Error("Token Query Lambda code must be packaged as an S3 asset.");
     }
 
+    // 从s3存储上拿到代码，去生成/更新lambda函数
     const apiFunction = new lambda.CfnFunction(this, "TokenQueryFunction", {
       functionName,
       description: "Token Query API running on AWS Lambda.",
@@ -151,22 +154,18 @@ export class ApiStack extends Stack {
     });
     apiFunction.addDependency(logGroup);
 
-    // Canary deployment plumbing: every code change publishes a new immutable
-    // Version, and the "live" Alias is what API Gateway actually invokes. Updating
-    // the Alias's target version is what CodeDeploy intercepts (via a CloudFormation
-    // Hook it injects under the hood) to shift traffic gradually instead of
-    // instantly -- see docs/knowledge/lambda-codedeploy-canary.md for the concepts.
-    // The Version's construct ID embeds a hash of the code asset so CloudFormation
-    // treats each code change as a brand new Version resource (old versions are
-    // left in place, matching how CDK's own `Function.currentVersion` works).
+    // 拿到代码内容的hash
     const codeAssetHash = functionCode.s3Location.objectKey.replace(/[^a-zA-Z0-9]/g, "");
+    // 包装一下lambda本身，让其支持L2协议。
     const importedApiFunction = lambda.Function.fromFunctionAttributes(this, "ImportedTokenQueryFunction", {
       functionArn: apiFunction.attrArn,
       sameEnvironment: true,
     });
+    // 对当前lambda的内容进行拍照生成快照
     const apiFunctionVersion = new lambda.Version(this, `TokenQueryFunctionVersion${codeAssetHash}`, {
       lambda: importedApiFunction,
     });
+    // 将门牌alias指向最新的版本，但是有LambdaDeploymentGroup的存在，流量会被托管，不会直接切过去
     const apiFunctionAlias = new lambda.Alias(this, "TokenQueryFunctionLiveAlias", {
       aliasName: "live",
       version: apiFunctionVersion,
