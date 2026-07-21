@@ -119,6 +119,22 @@ CDK_STACK_SCOPE=api pnpm --filter @token-query/infra-cdk cdk deploy token-query-
 --parameters token-query-api:AdminMigrationToken=<temporary-admin-token>
 ```
 
+### 灰度部署（Lambda Alias + CodeDeploy Canary）
+
+`token-query-api` 栈里 Lambda 走的是 Alias（固定名字 `live`）+ CodeDeploy `CANARY_10PERCENT_10MINUTES` 灰度策略，API Gateway 调用的也是这个 alias，不是裸函数。这套机制通过 CloudFormation 原生的 `UpdatePolicy: CodeDeployLambdaAliasUpdate` 触发——**上面这条 `cdk deploy` 命令本身不用改**，只要代码变了，`cdk deploy` 就会自动走"发布新 Version → 灰度切流量 10% → 观察 10 分钟 → 全量或自动回滚"，回滚判断复用的是监控层的 `token-query-api-heartbeat-failed` 这个 Alarm（见下方"监控层"小节），不需要额外配置。
+
+`cdk deploy` 这一步因此会比以前多花 10 分钟以上，是预期行为。概念详解和排障见 [docs/knowledge/lambda-codedeploy-canary.md](knowledge/lambda-codedeploy-canary.md)。
+
+常用观察命令：
+
+```bash
+# 看这次部署的状态（Created/InProgress/Succeeded/Stopped）
+aws deploy list-deployments --application-name token-query-api --deployment-group-name token-query-api-dg --region us-west-2
+
+# 看 alias 当前指向哪个/哪些 version（灰度中会有 RoutingConfig 加权，结束后变回单一 version）
+aws lambda get-alias --function-name token-query-function --name live --region us-west-2
+```
+
 部署后查看 API 输出：
 
 ```bash

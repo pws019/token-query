@@ -1,5 +1,12 @@
 import { CfnOutput, CfnParameter, Fn, Stack, type StackProps } from "aws-cdk-lib";
-import { aws_apigatewayv2 as apigatewayv2, aws_iam as iam, aws_lambda as lambda, aws_logs as logs } from "aws-cdk-lib";
+import {
+  aws_apigatewayv2 as apigatewayv2,
+  aws_cloudwatch as cloudwatch,
+  aws_codedeploy as codedeploy,
+  aws_iam as iam,
+  aws_lambda as lambda,
+  aws_logs as logs,
+} from "aws-cdk-lib";
 import type { Construct } from "constructs";
 import { fileURLToPath } from "node:url";
 import path from "node:path";
@@ -144,6 +151,54 @@ export class ApiStack extends Stack {
     });
     apiFunction.addDependency(logGroup);
 
+    // Canary deployment plumbing: every code change publishes a new immutable
+    // Version, and the "live" Alias is what API Gateway actually invokes. Updating
+    // the Alias's target version is what CodeDeploy intercepts (via a CloudFormation
+    // Hook it injects under the hood) to shift traffic gradually instead of
+    // instantly -- see docs/knowledge/lambda-codedeploy-canary.md for the concepts.
+    // The Version's construct ID embeds a hash of the code asset so CloudFormation
+    // treats each code change as a brand new Version resource (old versions are
+    // left in place, matching how CDK's own `Function.currentVersion` works).
+    const codeAssetHash = functionCode.s3Location.objectKey.replace(/[^a-zA-Z0-9]/g, "");
+    const importedApiFunction = lambda.Function.fromFunctionAttributes(this, "ImportedTokenQueryFunction", {
+      functionArn: apiFunction.attrArn,
+      sameEnvironment: true,
+    });
+    const apiFunctionVersion = new lambda.Version(this, `TokenQueryFunctionVersion${codeAssetHash}`, {
+      lambda: importedApiFunction,
+    });
+    const apiFunctionAlias = new lambda.Alias(this, "TokenQueryFunctionLiveAlias", {
+      aliasName: "live",
+      version: apiFunctionVersion,
+    });
+
+    // Reuse the heartbeat canary Alarm from monitoring-stack.ts instead of standing up
+    // a separate one -- if a bad deploy makes /health fail, this Alarm trips and
+    // CodeDeploy auto-rolls-back the Alias to the previous Version, no human needed.
+    const heartbeatAlarm = cloudwatch.Alarm.fromAlarmArn(
+      this,
+      "ImportedHeartbeatAlarm",
+      Fn.sub("arn:${AWS::Partition}:cloudwatch:${AWS::Region}:${AWS::AccountId}:alarm:token-query-api-heartbeat-failed"),
+    );
+
+    // The heartbeat canary only runs every 5 minutes (see monitoring-stack.ts), so a
+    // bake time of 5 minutes risks the canary never firing during the observation
+    // window at all. 10 minutes gives it a real chance to run at least once or twice.
+    new codedeploy.LambdaDeploymentGroup(this, "TokenQueryDeploymentGroup", {
+      application: new codedeploy.LambdaApplication(this, "TokenQueryCodeDeployApplication", {
+        applicationName: "token-query-api",
+      }),
+      deploymentGroupName: "token-query-api-dg",
+      alias: apiFunctionAlias,
+      deploymentConfig: codedeploy.LambdaDeploymentConfig.CANARY_10PERCENT_10MINUTES,
+      alarms: [heartbeatAlarm],
+      autoRollback: {
+        deploymentInAlarm: true,
+        failedDeployment: true,
+        stoppedDeployment: true,
+      },
+    });
+
     const httpApi = new apigatewayv2.CfnApi(this, "TokenQueryHttpApi", {
       name: "token-query-http-api",
       protocolType: "HTTP",
@@ -153,7 +208,7 @@ export class ApiStack extends Stack {
     const integration = new apigatewayv2.CfnIntegration(this, "TokenQueryFunctionIntegration", {
       apiId: httpApi.ref,
       integrationType: "AWS_PROXY",
-      integrationUri: apiFunction.attrArn,
+      integrationUri: apiFunctionAlias.functionArn,
       integrationMethod: "POST",
       payloadFormatVersion: "2.0",
     });
@@ -200,7 +255,7 @@ export class ApiStack extends Stack {
 
     new lambda.CfnPermission(this, "AllowHttpApiInvokeFunction", {
       action: "lambda:InvokeFunction",
-      functionName: apiFunction.ref,
+      functionName: apiFunctionAlias.functionArn,
       principal: "apigateway.amazonaws.com",
       sourceArn: Fn.sub("arn:${AWS::Partition}:execute-api:${AWS::Region}:${AWS::AccountId}:${ApiId}/*/*", {
         ApiId: httpApi.ref,
@@ -234,6 +289,11 @@ export class ApiStack extends Stack {
     new CfnOutput(this, "FunctionArn", {
       description: "Lambda function ARN managed by this CDK stack.",
       value: apiFunction.attrArn,
+    });
+
+    new CfnOutput(this, "FunctionLiveAliasArn", {
+      description: "Alias that API Gateway invokes and that CodeDeploy shifts traffic against during a canary deployment.",
+      value: apiFunctionAlias.functionArn,
     });
   }
 }
