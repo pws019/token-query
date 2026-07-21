@@ -1,4 +1,4 @@
-import { CfnOutput, CfnParameter, Fn, Stack, type StackProps } from "aws-cdk-lib";
+import { CfnOutput, CfnParameter, Duration, Fn, Stack, type StackProps } from "aws-cdk-lib";
 import {
   aws_apigatewayv2 as apigatewayv2,
   aws_cloudwatch as cloudwatch,
@@ -175,15 +175,37 @@ export class ApiStack extends Stack {
     // Reuse the heartbeat canary Alarm from monitoring-stack.ts instead of standing up
     // a separate one -- if a bad deploy makes /health fail, this Alarm trips and
     // CodeDeploy auto-rolls-back the Alias to the previous Version, no human needed.
+    // On its own this alarm is a weak rollback gate: the canary only samples once every
+    // 5 minutes (see monitoring-stack.ts), so a 10-minute bake window only gets 1-2 data
+    // points, and it only tests the public endpoint end-to-end, not "did the new code
+    // throw." The second alarm below closes that gap.
     const heartbeatAlarm = cloudwatch.Alarm.fromAlarmArn(
       this,
       "ImportedHeartbeatAlarm",
       Fn.sub("arn:${AWS::Partition}:cloudwatch:${AWS::Region}:${AWS::AccountId}:alarm:token-query-api-heartbeat-failed"),
     );
 
-    // The heartbeat canary only runs every 5 minutes (see monitoring-stack.ts), so a
-    // bake time of 5 minutes risks the canary never firing during the observation
-    // window at all. 10 minutes gives it a real chance to run at least once or twice.
+    // Lambda's own Errors metric, scoped to just this alias (Alias.metric() sets
+    // Resource: functionName:live so it only counts invocations that actually went
+    // through this alias, not $LATEST or other test invocations). Fires on every real
+    // invocation, not once per 5 minutes, so it catches a broken deploy far faster than
+    // the heartbeat canary can. treatMissingData is notBreaching (not breaching, unlike
+    // the heartbeat alarm) because Errors only publishes a datapoint when the function is
+    // actually invoked -- no traffic in a given minute must not read as "broken."
+    const aliasErrorsAlarm = apiFunctionAlias
+      .metricErrors({ period: Duration.minutes(1), statistic: "sum" })
+      .createAlarm(this, "TokenQueryFunctionLiveAliasErrorsAlarm", {
+        alarmName: "token-query-api-live-alias-errors",
+        alarmDescription:
+          "Errors on invocations routed through the token-query-function live alias -- catches broken code fast during a canary bake window.",
+        threshold: 1,
+        evaluationPeriods: 1,
+        comparisonOperator: cloudwatch.ComparisonOperator.GREATER_THAN_OR_EQUAL_TO_THRESHOLD,
+        treatMissingData: cloudwatch.TreatMissingData.NOT_BREACHING,
+      });
+
+    // 10 minutes (not the Part 1 default of 5) gives the sparser heartbeat canary a real
+    // chance to run at least once or twice during the bake window.
     new codedeploy.LambdaDeploymentGroup(this, "TokenQueryDeploymentGroup", {
       application: new codedeploy.LambdaApplication(this, "TokenQueryCodeDeployApplication", {
         applicationName: "token-query-api",
@@ -191,7 +213,7 @@ export class ApiStack extends Stack {
       deploymentGroupName: "token-query-api-dg",
       alias: apiFunctionAlias,
       deploymentConfig: codedeploy.LambdaDeploymentConfig.CANARY_10PERCENT_10MINUTES,
-      alarms: [heartbeatAlarm],
+      alarms: [heartbeatAlarm, aliasErrorsAlarm],
       autoRollback: {
         deploymentInAlarm: true,
         failedDeployment: true,
