@@ -175,14 +175,50 @@ flowchart TD
 
 ### 验证步骤（真正部署后）
 
-- [ ] 手动构造一次真实的 `database_upsert_failed`（比如临时给测试环境的 DB 连接串填错，触发一次插入失败），确认：
-  - Metric Filter 抓到了这条日志、指标数值变化
-  - Alarm 进入 ALARM
-  - EventBridge Rule 触发、ops-agent Lambda 被调用（`aws logs` 确认）
-  - GitHub 上出现了对应的 Issue，内容包含 LLM 生成的分析
-- [ ] 立刻再触发一次同样的错误，确认没有开新 Issue，而是在同一个 Issue 下追加了评论
-- [ ] 确认 Alarm 恢复 OK 状态后不会有任何多余动作（这次设计里 OK 状态不用挂 Target，Rule 的 Event Pattern 已经把 `state.value` 限定在 `["ALARM"]`）
-- [ ] 检查一次 LLM 调用的实际花费（按此次触发频率评估，这是目前项目里第一个会产生按次计费的外部 API 调用，值得留意别失控）
+- [x] 手动构造一次真实的 `database_upsert_failed`（这次用的是往 `/aws/lambda/token-query-function` 日志组手动 `put-log-events` 一条合成日志，没有真的去破坏生产 DB 连接——更安全，效果等价），确认：
+  - [x] Metric Filter 抓到了这条日志（`aws logs test-metric-filter` 验证 Pattern 命中）
+  - [x] Alarm 进入 ALARM（手动 `set-alarm-state` 触发，等同于真实指标越过阈值的效果）
+  - [x] EventBridge Rule 触发、ops-agent Lambda 被调用（`aws logs get-log-events` 确认，`Duration: 8366.63 ms`）
+  - [x] GitHub 上出现了对应的 Issue（[#13](https://github.com/pws019/token-query/issues/13)，内容包含 Gemini 生成的分析，验证完已关闭归档）
+- [ ] 立刻再触发一次同样的错误，确认没有开新 Issue，而是在同一个 Issue 下追加了评论——**这次没有重复测（Issue #13 已经关闭归档），去重逻辑本身在 Part 1 操练时已经验证过是有效的**，如果之后有真实的第二次触发，留意确认一下这条链路在真实资源上也符合预期
+- [x] 确认 Alarm 恢复 OK 状态后不会有任何多余动作（验证完手动把 Alarm 切回了 OK，这次设计里 OK 状态不用挂 Target，Rule 的 Event Pattern 已经把 `state.value` 限定在 `["ALARM"]`）
+- [ ] 检查一次 LLM 调用的实际花费（这是目前项目里第一个会产生按次计费的外部 API 调用，值得留意别失控；这次验证单次耗时 8.3 秒、Gemini 单次调用 token 量很小，先观察几次真实触发后的账单再判断）
+
+### 存档：这次真实落地的完整流程图
+
+已经在真实项目资源上部署并验证过一次（[GitHub Issue #13](https://github.com/pws019/token-query/issues/13)，验证完关闭归档），跟 Part 1 操练时的链路结构完全一致，只是资源名字换成了真实项目的。留个存档：
+
+```mermaid
+flowchart TD
+    APP["apps/server 业务代码\nqueryAndSaveGithubProfile 插入失败\n（github-profile.ts）"] --> LOG["logError('github_profile_request_failed', { code: 'database_upsert_failed', ... })\n（routes/github.ts，早就有的日志，这次没改代码）"]
+    LOG --> LG["日志组\n/aws/lambda/token-query-function"]
+    LG --> MF["Metric Filter: DbUpsertFailedMetricFilter\n{ $.level = error && $.event = github_profile_request_failed\n&& $.code = database_upsert_failed }"]
+    MF --> METRIC["自定义指标\nTokenQueryOps / DbUpsertFailedCount"]
+    METRIC --> ALARM["CloudWatch Alarm\ntoken-query-db-upsert-failed\nSum >= 1，treatMissingData: notBreaching"]
+    ALARM -->|"状态变为 ALARM"| RULE["EventBridge Rule\ntoken-query-db-upsert-failed-alarm-rule"]
+    RULE --> AGENT["Lambda: token-query-ops-agent\n（infra/cdk/lambda/ops-agent/index.js）"]
+
+    AGENT -->|"1. 取 alarmName + state.timestamp"| WINDOW["往前多抓 10 分钟的时间窗口"]
+    WINDOW -->|"2. Logs Insights 查询"| LG
+    LG -->|"抓到匹配的错误日志"| AGENT
+
+    AGENT -->|"3. 查 GitHub 有没有同指纹的 open issue\n(ops-agent-db-upsert-failed label)"| SEARCH{"有已存在的 Issue 吗？"}
+    SEARCH -->|"没有（这次验证是这条分支）"| ASKLLM["4. 调 Gemini API\n（gemini-flash-latest）"]
+    ASKLLM --> CREATE["5. 创建 Issue #13\n打 ops-agent / ops-agent-db-upsert-failed label"]
+    SEARCH -->|"有"| ASKLLM2["同样调 Gemini API"]
+    ASKLLM2 --> COMMENT["追加评论，不新开 Issue"]
+```
+
+跟 Part 1 操练时的表现对比，几个数字上的差异（都是好的方向，记一下）：
+
+| | Part 1 操练（`learning-ops-agent-consumer`） | Part 2 真实落地（`token-query-ops-agent`） |
+|---|---|---|
+| 耗时 | ~10 秒 | 8.3 秒 |
+| 内存（分配 / 实际用量） | 128MB / 110MB（很紧张） | 256MB / 122MB（余量宽松很多） |
+| 验证方式 | Lambda 控制台 Test 按钮 + 真实 EventBridge 触发 | 全程用真实资源：`put-log-events` 注入日志 + `set-alarm-state` 触发，没有走控制台 Test |
+| LLM 表现 | 根据合成日志给出"表不存在"的合理分析 | 更进一步——准确识别出这条日志本身是"人工验证注入的合成日志"，没有被牵着编故事 |
+
+这次验证还确认了一个小细节：往生产 Lambda 的日志组里手动 `put-log-events` 插入一条自建 log stream 的合成日志，不会对 Lambda 本身的真实运行/数据库产生任何影响（Lambda 自己的执行日志走它自己的 stream，我们只是在同一个日志组下新开了一个独立的 stream），是比"真的去改坏 DB 连接串"更安全的验证手段，以后类似场景可以照搬这个思路。
 
 ## 范围说明：这次明确不做的部分
 
