@@ -1,4 +1,4 @@
-import { CfnOutput, CfnParameter, Stack, type StackProps } from "aws-cdk-lib";
+import { CfnOutput, CfnParameter, Fn, Stack, type StackProps } from "aws-cdk-lib";
 import {
   aws_cloudwatch as cloudwatch,
   aws_ec2 as ec2,
@@ -136,10 +136,16 @@ export class MonitoringStack extends Stack {
       description: "Public Lambda API endpoint the Lambda heartbeat canary probes.",
     });
 
-    const goHealthCheckUrl = new CfnParameter(this, "GoHealthCheckUrl", {
-      type: "String",
-      default: "http://go.token-query.internal:8080/health",
-      description: "Internal Cloud Map DNS name for the Go service, probed directly from inside the VPC.",
+    const goInternalOrigin = new CfnParameter(this, "GoInternalOrigin", {
+      type: "AWS::SSM::Parameter::Value<String>",
+      default: "/token-query/foundation/go-internal-origin",
+      description: "Internal Go service origin (ALB DNS name), exported by the Go stack.",
+    });
+
+    const goAlbSecurityGroupId = new CfnParameter(this, "GoAlbSecurityGroupId", {
+      type: "AWS::SSM::Parameter::Value<AWS::EC2::SecurityGroup::Id>",
+      default: "/token-query/foundation/go-alb-security-group-id",
+      description: "Go ALB security group exported by the Go stack.",
     });
 
     const alertEmail = new CfnParameter(this, "AlertEmail", {
@@ -217,11 +223,25 @@ export class MonitoringStack extends Stack {
       ],
     });
 
-    // The Go ECS security group only allows inbound 8080 from the Lambda security
-    // group by default (see foundation-stack.ts GoIngressFromLambda). Without this
-    // rule the Go canary would sit in the VPC but still get connection-refused.
+    // Kept for backwards compatibility with anything still resolving Go's task IPs
+    // directly; the heartbeat canary itself now goes through the ALB (see
+    // GoAlbIngressFromCanary below) since native ECS blue/green deployments don't
+    // support Cloud Map service registration (AWS rejects serviceRegistries + a
+    // non-ROLLING deploymentController), so Cloud Map no longer has live instances.
     new ec2.CfnSecurityGroupIngress(this, "GoIngressFromCanary", {
       groupId: goSecurityGroupId.valueAsString,
+      sourceSecurityGroupId: goCanarySecurityGroup.attrGroupId,
+      ipProtocol: "tcp",
+      fromPort: 8080,
+      toPort: 8080,
+      description: "HTTP from the Token Query Go heartbeat Synthetics canary.",
+    });
+
+    // The Go canary now probes through the ALB (Cloud Map no longer has live
+    // instances -- see the comment above), so it needs to be let through the ALB's
+    // security group too.
+    new ec2.CfnSecurityGroupIngress(this, "GoAlbIngressFromCanary", {
+      groupId: goAlbSecurityGroupId.valueAsString,
       sourceSecurityGroupId: goCanarySecurityGroup.attrGroupId,
       ipProtocol: "tcp",
       fromPort: 8080,
@@ -233,7 +253,7 @@ export class MonitoringStack extends Stack {
       idPrefix: "GoHeartbeat",
       canaryName: "token-query-go-heartbeat",
       script: GO_HEARTBEAT_SCRIPT,
-      healthCheckUrl: goHealthCheckUrl.valueAsString,
+      healthCheckUrl: Fn.sub("${Origin}/health", { Origin: goInternalOrigin.valueAsString }),
       vpcId: vpcId.valueAsString,
       subnetIds: privateSubnetIds.valueAsList,
       securityGroupIds: [goCanarySecurityGroup.attrGroupId],

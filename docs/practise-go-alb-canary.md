@@ -231,20 +231,31 @@ flowchart LR
 
 ## Part 2 — 实际部署到 `go-stack.ts`
 
-### 需要改动的资源
+**状态：代码已改完（`go-stack.ts` + `api-stack.ts`），`cdk synth`/`cdk diff` 都验证过没问题，还没真正 `cdk deploy`。** 已确认的设计决策：Lambda→Go 的安全组只新增 `Lambda SG → ALB SG → Go SG` 这条新路径，`foundation-stack.ts` 里原有的 `GoIngressFromLambda` 直连规则保留不动（不做替换）；Cloud Map 服务发现保留（心跳 canary 继续直接探测，跟 ALB 是两条独立健康信号）；生产环境不加 test listener rule。
+
+### 已完成的改动
 
 | 资源 | 改动 |
 |---|---|
-| ALB | 新增：Internal 类型，放现有私有子网，新建 CDK 资源（`elbv2.CfnLoadBalancer` 或 L2 `ApplicationLoadBalancer`） |
-| Target Group ×2 | 新增：现役/候选各一个，类型 `ip`，端口 8080 |
-| ALB 安全组 | 新增：`Lambda SG → ALB SG → Go SG` 三层放行链，替换现在的 `Lambda SG → Go SG` 直连 |
-| `GoService`（`ecs.CfnService`，[go-stack.ts](../../infra/cdk/lib/go-stack.ts)） | 改：新增 `deploymentController: { type: "ECS" }`、`deploymentConfiguration`（`strategy`、`canaryConfiguration`、`bakeTimeInMinutes`、`alarms` 挂现有的 `token-query-go-heartbeat-failed`）、`loadBalancers`（含 `advancedConfiguration`）——**都是 L1 `CfnService` 已有的属性**（已经翻源码确认过），不用把整个 Go 栈迁移成 L2；评估要不要保留 `serviceRegistries`（Cloud Map），可以两者并存，但 Lambda 的调用目标要切到 ALB |
-| `apps/server` 的 `GO_SERVICE_ORIGIN` | 改：从 `http://go.token-query.internal:8080`（Cloud Map）换成 ALB 的内网域名 |
-| `deploy-go.yml` | **待 Part 1 验证结果确定要不要改**——如果验证出"`update-service`/`cdk deploy` 自己就能触发完整流程"，这个文件可能一行都不用动，跟 Lambda 落地时`deploy-lambda.yml` 没改是同一个故事；如果验证出还需要额外调用，再补充对应步骤 |
+| ALB（`GoAlb`） | 新增 `elbv2.CfnLoadBalancer`，Internal 类型，`subnets` 直接复用 `privateSubnetIds` 参数（跟 ECS Service 用的是同一份子网列表，天然可用区对齐，不会重现 Part 1 操练踩过的可用区漏配坑） |
+| Target Group ×2（`GoTargetGroupBlue`/`GoTargetGroupGreen`） | 新增，类型 `ip`，端口 8080，`healthCheckPath: "/health"`（跟 `apps/server` 探测的是同一个路径，不是操练时偷懒用的 `/`） |
+| `GoAlbSecurityGroup` + 两条 `CfnSecurityGroupIngress` | 新增 `Lambda SG → ALB SG → Go SG` 链路；`foundation-stack.ts` 现有的直连规则不动 |
+| `GoEcsInfraRole`（IAM Role） | 新增，trust `ecs.amazonaws.com`，授权 `elasticloadbalancing:ModifyRule`/`RegisterTargets`/`DeregisterTargets` 等，给 `advancedConfiguration.roleArn` 用 |
+| `GoService`（`ecs.CfnService`） | 新增 `deploymentController: { type: "ECS" }`、`deploymentConfiguration`（`strategy: CANARY`，`canaryPercent: 10`，`canaryBakeTimeInMinutes: 5`，`bakeTimeInMinutes: 10`，`alarms` 挂 `token-query-go-heartbeat-failed`）、`loadBalancers`（含 `advancedConfiguration`）；`serviceRegistries`（Cloud Map）保持不动 |
+| `GoInternalOriginParam`（新 SSM 参数） | 新增 `/token-query/foundation/go-internal-origin`，值是 ALB 的真实 DNS 名，供 `api-stack.ts` 读取 |
+| `api-stack.ts` 的 `GoServiceOrigin` | 从硬编码字符串改成 `AWS::SSM::Parameter::Value<String>`，读上面这个新 SSM 参数——顺带修复了"两个栈各自写死同一个字符串、没有真正跨栈引用"的现状问题 |
+| `deploy-go.yml` | **确认不用改**，Part 1 已验证 CDK 触发的 Task Definition 替换就能驱动完整 canary 流程 |
 
-### 验证步骤（真正执行到这一步时用）
+### `cdk diff` 实测结果（关键疑问已解答）
 
-- [ ] `cdk diff token-query-go` 确认只有预期的资源变化（ALB/TG/安全组/`deploymentController`/`deploymentConfiguration`），没有意外的资源替换（`deploymentController` 类型切换是否会导致 Service 被替换重建，需要实际 diff 一次才能确认）
+- **`GoService` 本身不会被替换重建**——`cdk diff token-query-go` 显示 `DeploymentConfiguration`/`DeploymentController`/`LoadBalancers` 都是 `[+]` 原地新增属性，`AWS::ECS::Service GoService` 只标了 `[~]`（修改），没有 replacement 警告。之前担心的"`deploymentController` 类型切换会不会导致 Service 被替换"这个问题已经解答：**不会**
+- `GoTaskDefinition` 显示 `may be replaced`，但原因是本地 diff 用的 `ImageTag` 默认值（`latest`）跟线上实际部署的 tag（`go-0d52e2b`）不一致，属于 diff 时没传参数导致的噪音，不是这次改动引入的问题——真正部署时 `deploy-go.yml` 会传真实的 `ImageTag`，不会有这个问题
+- `token-query-api` 的 diff 只有 `GoServiceOrigin` 参数类型变化符合预期，另外有一些 Lambda 代码包 hash 的差异（本地构建 vs 线上），跟这次改动无关
+
+### 验证步骤（真正执行部署时用）
+
+- [x] `cdk diff token-query-go` 确认只有预期的资源变化，没有意外的资源替换（见上面"实测结果"）
+- [ ] 部署顺序：先 `deploy-go.yml`（确认 ALB/Target Group 建好、任务 healthy、`go-internal-origin` 这个 SSM 参数已写入），再 `deploy-lambda.yml`（切 Lambda 到 ALB 地址）——顺序不能反，`api-stack.ts` 新参数是 SSM 类型，部署时如果 SSM 参数还不存在会直接报错
 - [ ] 手动触发一次真实的镜像更新，观察 ALB 后面两个 Target Group 的健康任务数变化
 - [ ] 确认 Lambda 调 Go 的请求在灰度窗口内确实按比例分布到两个版本（可以让 Go 的 `/health` 也带一个类似 Lambda 那次的 `version` 字段，用同样的思路验证）
 - [ ] 故意让 Go 心跳 canary 失败一次（比如临时改坏 `/health`），确认自动回滚

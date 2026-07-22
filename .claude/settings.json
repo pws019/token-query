@@ -1,0 +1,8 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(cd infra/cdk && CDK_STACK_SCOPE=* CDK_DEFAULT_ACCOUNT=707605822527 CDK_DEFAULT_REGION=us-west-2 npx cdk *)",
+      "Bash(CDK_STACK_SCOPE=* CDK_DEFAULT_ACCOUNT=707605822527 CDK_DEFAULT_REGION=us-west-2 npx cdk *)"
+    ]
+  }
+}

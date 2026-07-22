@@ -48,9 +48,9 @@ export class ApiStack extends Stack {
     });
 
     const goServiceOrigin = new CfnParameter(this, "GoServiceOrigin", {
-      type: "String",
-      default: "http://go.token-query.internal:8080",
-      description: "Internal Go service origin resolved through Cloud Map.",
+      type: "AWS::SSM::Parameter::Value<String>",
+      default: "/token-query/foundation/go-internal-origin",
+      description: "Internal Go service origin, resolved from the ALB DNS name exported by the Go stack.",
     });
 
     const privateSubnetIds = new CfnParameter(this, "PrivateSubnetIds", {

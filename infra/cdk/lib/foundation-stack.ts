@@ -4,6 +4,7 @@ import {
   aws_ec2 as ec2,
   aws_ecr as ecr,
   aws_ecs as ecs,
+  aws_elasticloadbalancingv2 as elbv2,
   aws_iam as iam,
   aws_rds as rds,
   aws_secretsmanager as secretsmanager,
@@ -262,6 +263,120 @@ export class FoundationStack extends Stack {
       description: "Private service discovery namespace for Token Query services.",
       tags: nameTags("token-query-internal-namespace"),
     });
+
+    const goAlbSecurityGroup = new ec2.CfnSecurityGroup(this, "GoAlbSecurityGroup", {
+      groupDescription: "Security group for the internal Token Query Go ALB.",
+      groupName: "token-query-go-alb-sg",
+      vpcId: vpc.ref,
+      securityGroupEgress: [
+        {
+          cidrIp: "0.0.0.0/0",
+          ipProtocol: "-1",
+          description: "Allow all outbound traffic.",
+        },
+      ],
+      tags: nameTags("token-query-go-alb-sg"),
+    });
+
+    new ec2.CfnSecurityGroupIngress(this, "GoAlbIngressFromLambda", {
+      groupId: goAlbSecurityGroup.attrGroupId,
+      sourceSecurityGroupId: lambdaSecurityGroup.attrGroupId,
+      ipProtocol: "tcp",
+      fromPort: 8080,
+      toPort: 8080,
+      description: "HTTP from Token Query Lambda functions.",
+    });
+
+    new ec2.CfnSecurityGroupIngress(this, "GoIngressFromAlb", {
+      groupId: goSecurityGroup.attrGroupId,
+      sourceSecurityGroupId: goAlbSecurityGroup.attrGroupId,
+      ipProtocol: "tcp",
+      fromPort: 8080,
+      toPort: 8080,
+      description: "HTTP from the Token Query Go internal ALB.",
+    });
+
+    const goAlb = new elbv2.CfnLoadBalancer(this, "GoAlb", {
+      name: "token-query-go-alb",
+      scheme: "internal",
+      type: "application",
+      subnets: privateSubnetIds,
+      securityGroups: [goAlbSecurityGroup.attrGroupId],
+      tags: nameTags("token-query-go-alb"),
+    });
+
+    const goTargetGroupBlue = new elbv2.CfnTargetGroup(this, "GoTargetGroupBlue", {
+      name: "token-query-go-tg-blue",
+      targetType: "ip",
+      protocol: "HTTP",
+      port: 8080,
+      vpcId: vpc.ref,
+      healthCheckPath: "/health",
+      healthCheckProtocol: "HTTP",
+      healthCheckIntervalSeconds: 15,
+      healthyThresholdCount: 2,
+      unhealthyThresholdCount: 2,
+      tags: nameTags("token-query-go-tg-blue"),
+    });
+
+    const goTargetGroupGreen = new elbv2.CfnTargetGroup(this, "GoTargetGroupGreen", {
+      name: "token-query-go-tg-green",
+      targetType: "ip",
+      protocol: "HTTP",
+      port: 8080,
+      vpcId: vpc.ref,
+      healthCheckPath: "/health",
+      healthCheckProtocol: "HTTP",
+      healthCheckIntervalSeconds: 15,
+      healthyThresholdCount: 2,
+      unhealthyThresholdCount: 2,
+      tags: nameTags("token-query-go-tg-green"),
+    });
+
+    const goAlbListener = new elbv2.CfnListener(this, "GoAlbListener", {
+      loadBalancerArn: goAlb.ref,
+      port: 8080,
+      protocol: "HTTP",
+      defaultActions: [
+        {
+          type: "forward",
+          targetGroupArn: goTargetGroupBlue.ref,
+        },
+      ],
+    });
+
+    // ECS's advancedConfiguration.productionListenerRule needs a real Rule ARN for an
+    // ALB (a plain Listener ARN only works for NLB) -- the Listener's implicit default
+    // rule has its own ARN under the hood, but CloudFormation doesn't expose it as an
+    // attribute of AWS::ElasticLoadBalancingV2::Listener, so we declare an explicit
+    // catch-all rule instead and hand ECS *that* rule's ARN.
+    const goAlbProductionRule = new elbv2.CfnListenerRule(this, "GoAlbProductionRule", {
+      listenerArn: goAlbListener.ref,
+      priority: 1,
+      conditions: [
+        {
+          field: "path-pattern",
+          pathPatternConfig: {
+            values: ["/*"],
+          },
+        },
+      ],
+      actions: [
+        {
+          type: "forward",
+          targetGroupArn: goTargetGroupBlue.ref,
+        },
+      ],
+    });
+
+    const goEcsInfraRole = new iam.Role(this, "GoEcsInfraRole", {
+      roleName: "token-query-go-ecs-infra-role",
+      assumedBy: new iam.ServicePrincipal("ecs.amazonaws.com"),
+      description: "Allows ECS to manage the Go ALB's target groups and listener rules during blue/green deployments.",
+      managedPolicies: [iam.ManagedPolicy.fromAwsManagedPolicyName("AmazonECSInfrastructureRolePolicyForLoadBalancers")],
+    });
+
+    const goInternalOrigin = Fn.sub("http://${AlbDns}:8080", { AlbDns: goAlb.attrDnsName });
 
     const goCodeBuildRole = new iam.Role(this, "GoCodeBuildRole", {
       roleName: "token-query-go-codebuild-role",
@@ -586,6 +701,41 @@ export class FoundationStack extends Stack {
     new ssm.StringParameter(this, "CloudMapNamespaceNameParam", {
       parameterName: "/token-query/foundation/cloudmap-namespace-name",
       stringValue: "token-query.internal",
+    });
+
+    new ssm.StringParameter(this, "GoAlbSecurityGroupIdParam", {
+      parameterName: "/token-query/foundation/go-alb-security-group-id",
+      stringValue: goAlbSecurityGroup.attrGroupId,
+    });
+
+    new ssm.StringParameter(this, "GoAlbListenerArnParam", {
+      parameterName: "/token-query/foundation/go-alb-listener-arn",
+      stringValue: goAlbListener.ref,
+    });
+
+    new ssm.StringParameter(this, "GoAlbProductionRuleArnParam", {
+      parameterName: "/token-query/foundation/go-alb-production-rule-arn",
+      stringValue: goAlbProductionRule.ref,
+    });
+
+    new ssm.StringParameter(this, "GoTargetGroupBlueArnParam", {
+      parameterName: "/token-query/foundation/go-target-group-blue-arn",
+      stringValue: goTargetGroupBlue.ref,
+    });
+
+    new ssm.StringParameter(this, "GoTargetGroupGreenArnParam", {
+      parameterName: "/token-query/foundation/go-target-group-green-arn",
+      stringValue: goTargetGroupGreen.ref,
+    });
+
+    new ssm.StringParameter(this, "GoEcsInfraRoleArnParam", {
+      parameterName: "/token-query/foundation/go-ecs-infra-role-arn",
+      stringValue: goEcsInfraRole.roleArn,
+    });
+
+    new ssm.StringParameter(this, "GoInternalOriginParam", {
+      parameterName: "/token-query/foundation/go-internal-origin",
+      stringValue: goInternalOrigin,
     });
 
     new ssm.StringParameter(this, "GoCodeBuildProjectNameParam", {
