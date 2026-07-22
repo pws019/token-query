@@ -5,6 +5,7 @@ import { ApiStack } from "../lib/api-stack";
 import { FoundationStack } from "../lib/foundation-stack";
 import { GoStack } from "../lib/go-stack";
 import { MonitoringStack } from "../lib/monitoring-stack";
+import { OpsAgentStack } from "../lib/ops-agent-stack";
 import { PermissionsStack } from "../lib/permissions-stack";
 import { PreviewApiStack } from "../lib/preview-api-stack";
 import { PreviewCleanupStack } from "../lib/preview-cleanup-stack";
@@ -41,6 +42,10 @@ if (stackScope === "go" || stackScope === "all") {
 
 if (stackScope === "monitoring" || stackScope === "all") {
   new MonitoringStack(app, "token-query-monitoring", { env });
+}
+
+if (stackScope === "ops-agent" || stackScope === "all") {
+  new OpsAgentStack(app, "token-query-ops-agent", { env });
 }
 
 if (stackScope === "preview-cleanup" || stackScope === "all") {
