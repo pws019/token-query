@@ -1,0 +1,930 @@
+<title>ECS Canary 部署解剖 — learning-go-canary</title>
+<style>
+
+  @font-face {
+    font-family: 'stack-mono';
+    src: local('SF Mono'), local('Cascadia Code'), local('Roboto Mono');
+  }
+
+  :root {
+    --paper: #f3f1ea;
+    --paper-raised: #fbfaf6;
+    --ink: #1e2430;
+    --ink-soft: #5c6270;
+    --ink-faint: #8b8f7f;
+    --line: #d9d4c6;
+    --line-strong: #c3bda9;
+    --compute: #2f6f68;
+    --compute-soft: #e4efec;
+    --traffic: #b5651d;
+    --traffic-soft: #f5e6d3;
+    --danger: #a13a2f;
+    --danger-soft: #f5e0da;
+    --font-display: ui-monospace, 'SF Mono', 'Cascadia Code', 'Roboto Mono', 'Consolas', monospace;
+    --font-body: -apple-system, BlinkMacSystemFont, 'Segoe UI', 'PingFang SC', 'Microsoft YaHei', sans-serif;
+  }
+
+  @media (prefers-color-scheme: dark) {
+    :root {
+      --paper: #14181f;
+      --paper-raised: #1a1f27;
+      --ink: #e9e7df;
+      --ink-soft: #9aa1ac;
+      --ink-faint: #6b7280;
+      --line: #2b313b;
+      --line-strong: #3a4149;
+      --compute: #5fb0a6;
+      --compute-soft: #1c2c2a;
+      --traffic: #e2953f;
+      --traffic-soft: #2e2416;
+      --danger: #e2695a;
+      --danger-soft: #34201d;
+    }
+  }
+  :root[data-theme="dark"] {
+    --paper: #14181f;
+    --paper-raised: #1a1f27;
+    --ink: #e9e7df;
+    --ink-soft: #9aa1ac;
+    --ink-faint: #6b7280;
+    --line: #2b313b;
+    --line-strong: #3a4149;
+    --compute: #5fb0a6;
+    --compute-soft: #1c2c2a;
+    --traffic: #e2953f;
+    --traffic-soft: #2e2416;
+    --danger: #e2695a;
+    --danger-soft: #34201d;
+  }
+  :root[data-theme="light"] {
+    --paper: #f3f1ea;
+    --paper-raised: #fbfaf6;
+    --ink: #1e2430;
+    --ink-soft: #5c6270;
+    --ink-faint: #8b8f7f;
+    --line: #d9d4c6;
+    --line-strong: #c3bda9;
+    --compute: #2f6f68;
+    --compute-soft: #e4efec;
+    --traffic: #b5651d;
+    --traffic-soft: #f5e6d3;
+    --danger: #a13a2f;
+    --danger-soft: #f5e0da;
+  }
+
+  * { box-sizing: border-box; }
+  html, body { margin: 0; padding: 0; }
+  body {
+    background: var(--paper);
+    color: var(--ink);
+    font-family: var(--font-body);
+    line-height: 1.6;
+    padding: 0 0 6rem;
+  }
+
+  ::selection { background: var(--traffic-soft); color: var(--ink); }
+
+  .wrap { max-width: 1080px; margin: 0 auto; padding: 3.5rem 1.75rem 0; }
+
+  header.page {
+    margin-bottom: 3rem;
+    padding-bottom: 2rem;
+    border-bottom: 1px solid var(--line);
+  }
+  .eyebrow {
+    font-family: var(--font-display);
+    font-size: 0.72rem;
+    letter-spacing: 0.14em;
+    text-transform: uppercase;
+    color: var(--ink-faint);
+    margin: 0 0 0.9rem;
+  }
+  h1 {
+    font-family: var(--font-display);
+    font-size: clamp(1.6rem, 3.4vw, 2.35rem);
+    font-weight: 600;
+    letter-spacing: -0.01em;
+    margin: 0 0 0.7rem;
+    text-wrap: balance;
+  }
+  header.page p {
+    color: var(--ink-soft);
+    max-width: 62ch;
+    margin: 0;
+    font-size: 0.98rem;
+  }
+  header.page code { font-family: var(--font-display); font-size: 0.9em; }
+
+  h2 {
+    font-family: var(--font-display);
+    font-size: 1rem;
+    font-weight: 600;
+    letter-spacing: 0.01em;
+    margin: 0 0 0.3rem;
+  }
+  .section-head {
+    display: flex;
+    align-items: baseline;
+    gap: 0.75rem;
+    margin-bottom: 1.4rem;
+  }
+  .section-num {
+    font-family: var(--font-display);
+    font-size: 0.75rem;
+    color: var(--ink-faint);
+  }
+  .section-sub {
+    color: var(--ink-soft);
+    font-size: 0.92rem;
+    max-width: 68ch;
+    margin: 0 0 1.6rem;
+  }
+
+  section { margin-bottom: 4rem; }
+
+  /* ---------- hierarchy diagram ---------- */
+
+  .hier {
+    display: grid;
+    grid-template-columns: 1fr auto 1fr;
+    gap: 0;
+    align-items: stretch;
+  }
+  .hier-col { display: flex; flex-direction: column; gap: 0.6rem; }
+  .hier-col-label {
+    font-family: var(--font-display);
+    font-size: 0.72rem;
+    letter-spacing: 0.1em;
+    text-transform: uppercase;
+    padding-bottom: 0.6rem;
+    margin-bottom: 0.2rem;
+    border-bottom: 1px dashed var(--line-strong);
+  }
+  .hier-col.compute .hier-col-label { color: var(--compute); }
+  .hier-col.traffic .hier-col-label { color: var(--traffic); }
+
+  .node {
+    background: var(--paper-raised);
+    border: 1px solid var(--line-strong);
+    border-radius: 3px;
+    padding: 0.85rem 1rem;
+    position: relative;
+  }
+  .node + .node { margin-top: 0; }
+  .node-kind {
+    font-family: var(--font-display);
+    font-size: 0.65rem;
+    letter-spacing: 0.08em;
+    text-transform: uppercase;
+    color: var(--ink-faint);
+    display: block;
+    margin-bottom: 0.25rem;
+  }
+  .node-name {
+    font-family: var(--font-display);
+    font-size: 0.88rem;
+    font-weight: 600;
+    display: block;
+  }
+  .node-meta {
+    font-size: 0.8rem;
+    color: var(--ink-soft);
+    margin-top: 0.35rem;
+    line-height: 1.5;
+  }
+  .node-meta .k { color: var(--ink-faint); }
+
+  .compute .node { border-left: 3px solid var(--compute); }
+  .traffic .node { border-left: 3px solid var(--traffic); }
+
+  .nest {
+    margin-left: 1.1rem;
+    padding-left: 1.1rem;
+    border-left: 1px dashed var(--line-strong);
+    display: flex;
+    flex-direction: column;
+    gap: 0.6rem;
+  }
+
+  .twin { display: flex; gap: 0.6rem; }
+  .twin .node { flex: 1; }
+  .twin .node.slot-a { border-left-color: var(--compute); }
+  .twin .node.slot-b { border-left-color: var(--traffic); }
+
+  .bridge-col {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    padding: 0 0.9rem;
+  }
+  .bridge {
+    writing-mode: vertical-rl;
+    text-orientation: mixed;
+    font-family: var(--font-display);
+    font-size: 0.68rem;
+    letter-spacing: 0.08em;
+    color: var(--ink-faint);
+    white-space: nowrap;
+    position: relative;
+    padding: 1rem 0;
+  }
+  .bridge::before, .bridge::after {
+    content: "";
+    position: absolute;
+    left: 50%;
+    width: 1px;
+    background: repeating-linear-gradient(to bottom, var(--line-strong) 0 4px, transparent 4px 8px);
+    transform: translateX(-50%);
+  }
+  .bridge::before { top: -3.2rem; height: 3.2rem; }
+  .bridge::after { bottom: -3.2rem; height: 3.2rem; }
+
+  @media (max-width: 760px) {
+    .hier { grid-template-columns: 1fr; }
+    .bridge-col { padding: 1.2rem 0; }
+    .bridge { writing-mode: horizontal-tb; padding: 0; }
+    .bridge::before, .bridge::after { display: none; }
+    .twin { flex-direction: column; }
+  }
+
+  /* ---------- ownership note ---------- */
+  .ownership {
+    margin-top: 2rem;
+    background: var(--paper-raised);
+    border: 1px solid var(--line);
+    border-radius: 3px;
+    padding: 1.1rem 1.3rem;
+    font-size: 0.88rem;
+    color: var(--ink-soft);
+  }
+  .ownership strong { color: var(--ink); font-weight: 600; }
+  .ownership .tag {
+    font-family: var(--font-display);
+    font-size: 0.68rem;
+    letter-spacing: 0.06em;
+    text-transform: uppercase;
+    background: var(--compute-soft);
+    color: var(--compute);
+    padding: 0.15rem 0.5rem;
+    border-radius: 2px;
+    margin-right: 0.5rem;
+  }
+
+  /* ---------- timeline ---------- */
+
+  .timeline-scroll { overflow-x: auto; padding-bottom: 0.5rem; }
+  .timeline {
+    display: flex;
+    flex-direction: column;
+    min-width: 640px;
+    position: relative;
+  }
+  .tl-row {
+    display: grid;
+    grid-template-columns: 84px 20px 1fr;
+    column-gap: 0.9rem;
+    padding: 0.6rem 0;
+  }
+  .tl-time {
+    font-family: var(--font-display);
+    font-variant-numeric: tabular-nums;
+    font-size: 0.78rem;
+    color: var(--ink-faint);
+    text-align: right;
+    padding-top: 0.1rem;
+  }
+  .tl-spine { position: relative; display: flex; justify-content: center; }
+  .tl-spine::before {
+    content: "";
+    position: absolute;
+    top: 0; bottom: 0;
+    width: 1px;
+    background: var(--line-strong);
+  }
+  .tl-row:first-child .tl-spine::before { top: 50%; }
+  .tl-row:last-child .tl-spine::before { bottom: 50%; }
+  .tl-dot {
+    position: relative;
+    width: 9px; height: 9px;
+    border-radius: 50%;
+    margin-top: 0.15rem;
+    background: var(--ink-faint);
+    border: 2px solid var(--paper);
+    box-shadow: 0 0 0 1px var(--line-strong);
+  }
+  .tl-row.start .tl-dot { background: var(--compute); box-shadow: 0 0 0 1px var(--compute); }
+  .tl-row.register .tl-dot { background: var(--traffic); box-shadow: 0 0 0 1px var(--traffic); }
+  .tl-row.shift .tl-dot { background: var(--traffic); box-shadow: 0 0 0 1px var(--traffic); }
+  .tl-row.incident .tl-dot { background: var(--danger); box-shadow: 0 0 0 1px var(--danger); }
+  .tl-row.drain .tl-dot { background: var(--ink-faint); }
+
+  .tl-body { padding-top: 0.05rem; }
+  .tl-label {
+    font-size: 0.9rem;
+    color: var(--ink);
+  }
+  .tl-label code { font-family: var(--font-display); font-size: 0.85em; color: var(--ink-soft); }
+  .tl-detail {
+    font-size: 0.82rem;
+    color: var(--ink-soft);
+    margin-top: 0.2rem;
+  }
+  .tl-row.incident .tl-body {
+    background: var(--danger-soft);
+    border-radius: 3px;
+    padding: 0.5rem 0.7rem;
+    margin: -0.1rem -0.7rem;
+  }
+  .tl-row.incident .tl-label { color: var(--danger); font-weight: 600; }
+  .stage-pill {
+    display: inline-block;
+    font-family: var(--font-display);
+    font-size: 0.66rem;
+    letter-spacing: 0.06em;
+    text-transform: uppercase;
+    padding: 0.1rem 0.45rem;
+    border-radius: 2px;
+    margin-left: 0.5rem;
+    background: var(--traffic-soft);
+    color: var(--traffic);
+    vertical-align: middle;
+  }
+
+  /* ---------- weight bars ---------- */
+  .weights {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
+    gap: 1rem;
+    margin-top: 1.6rem;
+  }
+  .weight-card {
+    background: var(--paper-raised);
+    border: 1px solid var(--line);
+    border-radius: 3px;
+    padding: 1rem 1.1rem;
+  }
+  .weight-card h3 {
+    font-family: var(--font-display);
+    font-size: 0.78rem;
+    margin: 0 0 0.7rem;
+    color: var(--ink-soft);
+    font-weight: 600;
+  }
+  .wbar-row { display: flex; align-items: center; gap: 0.6rem; margin-bottom: 0.55rem; font-size: 0.8rem; }
+  .wbar-row:last-child { margin-bottom: 0; }
+  .wbar-label { width: 3.4rem; font-family: var(--font-display); color: var(--ink-soft); flex-shrink: 0; }
+  .wbar-track { flex: 1; height: 8px; background: var(--line); border-radius: 4px; overflow: hidden; }
+  .wbar-fill { height: 100%; border-radius: 4px; }
+  .wbar-fill.v1 { background: var(--ink-faint); }
+  .wbar-fill.v2 { background: var(--traffic); }
+  .wbar-pct { width: 2.6rem; text-align: right; font-family: var(--font-display); font-variant-numeric: tabular-nums; color: var(--ink-soft); flex-shrink: 0; }
+
+  /* ---------- registration chain ---------- */
+  .chain-scroll { overflow-x: auto; padding-bottom: 0.5rem; }
+  .chain {
+    display: flex;
+    align-items: stretch;
+    gap: 0;
+    min-width: 760px;
+  }
+  .chain-step {
+    flex: 1;
+    background: var(--paper-raised);
+    border: 1px solid var(--line-strong);
+    border-radius: 3px;
+    padding: 1rem 1.1rem;
+    position: relative;
+  }
+  .chain-step .step-num {
+    font-family: var(--font-display);
+    font-size: 0.68rem;
+    color: var(--ink-faint);
+    display: block;
+    margin-bottom: 0.4rem;
+  }
+  .chain-step .step-title {
+    font-family: var(--font-display);
+    font-size: 0.86rem;
+    font-weight: 600;
+    display: block;
+    margin-bottom: 0.45rem;
+  }
+  .chain-step .step-who {
+    display: inline-block;
+    font-family: var(--font-display);
+    font-size: 0.62rem;
+    letter-spacing: 0.05em;
+    text-transform: uppercase;
+    padding: 0.1rem 0.4rem;
+    border-radius: 2px;
+    margin-bottom: 0.55rem;
+    background: var(--compute-soft);
+    color: var(--compute);
+  }
+  .chain-step.who-alb .step-who { background: var(--traffic-soft); color: var(--traffic); }
+  .chain-step p {
+    font-size: 0.82rem;
+    color: var(--ink-soft);
+    margin: 0;
+    line-height: 1.55;
+  }
+  .chain-step code { font-family: var(--font-display); font-size: 0.85em; }
+  .chain-arrow {
+    flex: 0 0 2.2rem;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    color: var(--line-strong);
+    font-size: 1.1rem;
+  }
+  @media (max-width: 760px) {
+    .chain { flex-direction: column; min-width: 0; }
+    .chain-arrow { flex-direction: row; transform: rotate(90deg); padding: 0.3rem 0; }
+  }
+
+  .reg-note {
+    margin-top: 1.4rem;
+    background: var(--traffic-soft);
+    border-radius: 3px;
+    padding: 1rem 1.2rem;
+    font-size: 0.87rem;
+    color: var(--ink);
+  }
+  .reg-note .tag {
+    font-family: var(--font-display);
+    font-size: 0.68rem;
+    letter-spacing: 0.06em;
+    text-transform: uppercase;
+    background: var(--traffic);
+    color: var(--paper-raised);
+    padding: 0.15rem 0.5rem;
+    border-radius: 2px;
+    margin-right: 0.6rem;
+  }
+  .reg-note code { font-family: var(--font-display); font-size: 0.9em; }
+
+  /* ---------- two-layer funnel ---------- */
+  .funnel {
+    display: grid;
+    grid-template-columns: repeat(4, 1fr);
+    grid-template-rows: auto 3.4rem auto 3.4rem auto;
+    min-width: 620px;
+  }
+  .funnel-request {
+    grid-column: 1 / 5;
+    justify-self: center;
+    width: min(340px, 70%);
+  }
+  .funnel-zone {
+    grid-column: 1 / 5;
+    position: relative;
+  }
+  .funnel-zone .ln {
+    position: absolute;
+    background: var(--line-strong);
+  }
+  .funnel-zone .ln.weighted { background: var(--traffic); }
+  .funnel-zone .pct {
+    position: absolute;
+    transform: translate(-50%, 0);
+    font-family: var(--font-display);
+    font-size: 0.72rem;
+    font-weight: 600;
+    color: var(--traffic);
+    background: var(--paper);
+    padding: 0 0.3rem;
+  }
+  .funnel-zone .rr-label {
+    position: absolute;
+    transform: translate(-50%, 0);
+    font-family: var(--font-display);
+    font-size: 0.66rem;
+    color: var(--ink-faint);
+    background: var(--paper);
+    padding: 0 0.3rem;
+    white-space: nowrap;
+  }
+  .funnel-group {
+    justify-self: center;
+    width: min(220px, 88%);
+  }
+  .funnel-group.a { grid-column: 1 / 3; }
+  .funnel-group.b { grid-column: 3 / 5; }
+  .funnel-task {
+    justify-self: center;
+    width: 88%;
+  }
+
+  .funnel .node .node-name { font-size: 0.82rem; }
+  .funnel-group .node { border-left-width: 3px; }
+  .funnel-group.a .node { border-left-color: var(--traffic); }
+  .funnel-group.b .node { border-left-color: var(--traffic); }
+  .funnel-task .node { border-left-color: var(--ink-faint); padding: 0.6rem 0.85rem; }
+
+  @media (max-width: 760px) {
+    .funnel { min-width: 0; }
+  }
+
+  .funnel-caption {
+    margin-top: 1.6rem;
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(240px, 1fr));
+    gap: 1rem;
+  }
+  .funnel-caption .cap-card {
+    background: var(--paper-raised);
+    border: 1px solid var(--line);
+    border-radius: 3px;
+    padding: 0.9rem 1.05rem;
+    font-size: 0.85rem;
+    color: var(--ink-soft);
+  }
+  .funnel-caption .cap-card .cap-tag {
+    display: block;
+    font-family: var(--font-display);
+    font-size: 0.68rem;
+    letter-spacing: 0.06em;
+    text-transform: uppercase;
+    margin-bottom: 0.4rem;
+  }
+  .funnel-caption .cap-card.tier1 .cap-tag { color: var(--traffic); }
+  .funnel-caption .cap-card.tier2 .cap-tag { color: var(--ink-faint); }
+
+  footer {
+    max-width: 1080px;
+    margin: 0 auto;
+    padding: 2rem 1.75rem 0;
+    border-top: 1px solid var(--line);
+    color: var(--ink-faint);
+    font-size: 0.8rem;
+  }
+</style>
+
+<div class="wrap">
+
+  <header class="page">
+    <p class="eyebrow">token-query · go-alb-canary-deployment 操练记录</p>
+    <h1>Cluster / Service / Task 与 ALB / Target Group 到底是什么关系</h1>
+    <p>两棵树，一座桥。左边是 ECS 管"要跑什么"，右边是 ALB 管"流量给谁"，中间靠 <code>Target = Task 的 ENI IP</code> 连起来。往下先拆开"桥"具体是怎么搭的，再看 <code>learning-go-canary-service</code> 这次真实 v1→v2 灰度发布时，两边怎么互相触发。</p>
+  </header>
+
+  <section>
+    <div class="section-head">
+      <span class="section-num">01</span>
+      <h2>静态结构 — 谁装着谁</h2>
+    </div>
+    <p class="section-sub">左边是"计算"层级，右边是"流量"层级，两边平时互不知道对方存在——是 ECS 的 deployment controller 在部署时把两边接起来的。</p>
+
+    <div class="hier">
+      <div class="hier-col compute">
+        <div class="hier-col-label">计算侧 · ECS</div>
+
+        <div class="node">
+          <span class="node-kind">Cluster</span>
+          <span class="node-name">learning-go-canary-cluster</span>
+          <span class="node-meta"><span class="k">作用</span> 一堆 Service 的资源边界，本身不跑代码</span>
+        </div>
+
+        <div class="nest">
+          <div class="node">
+            <span class="node-kind">Service</span>
+            <span class="node-name">learning-go-canary-service</span>
+            <span class="node-meta">
+              <span class="k">strategy</span> CANARY　<span class="k">desired</span> 2<br>
+              <span class="k">职责</span> 维持任务数量 + 按 canary 节奏推进发布
+            </span>
+          </div>
+
+          <div class="nest">
+            <div class="node">
+              <span class="node-kind">Task Definition family</span>
+              <span class="node-name">learning-go-canary</span>
+              <span class="node-meta"><span class="k">:1</span> <code>-text=v1</code>　<span class="k">:2</span> <code>-text=v2</code></span>
+            </div>
+
+            <div class="twin">
+              <div class="node slot-a">
+                <span class="node-kind">Task</span>
+                <span class="node-name">10.0.3.30:5678</span>
+                <span class="node-meta">自己的 ENI，独立 IP</span>
+              </div>
+              <div class="node slot-a">
+                <span class="node-kind">Task</span>
+                <span class="node-name">10.0.4.208:5678</span>
+                <span class="node-meta">自己的 ENI，独立 IP</span>
+              </div>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <div class="bridge-col">
+        <span class="bridge">Target = Task 的 ENI IP</span>
+      </div>
+
+      <div class="hier-col traffic">
+        <div class="hier-col-label">流量侧 · ALB</div>
+
+        <div class="node">
+          <span class="node-kind">Load Balancer</span>
+          <span class="node-name">learning-go-canary-alb</span>
+          <span class="node-meta"><span class="k">scheme</span> internal　<span class="k">作用</span> 接请求，不关心谁在跑</span>
+        </div>
+
+        <div class="nest">
+          <div class="node">
+            <span class="node-kind">Listener</span>
+            <span class="node-name">HTTP : 80</span>
+          </div>
+
+          <div class="nest">
+            <div class="node">
+              <span class="node-kind">Rule</span>
+              <span class="node-name">production（default）</span>
+              <span class="node-meta">真实用户流量走这条，权重被 ECS 动态改写</span>
+            </div>
+            <div class="node">
+              <span class="node-kind">Rule</span>
+              <span class="node-name"><code>/__green-test*</code>（test）</span>
+              <span class="node-meta">灰度期间探测候选版本用</span>
+            </div>
+
+            <div class="twin">
+              <div class="node slot-b">
+                <span class="node-kind">Target Group</span>
+                <span class="node-name">learning-tg-a</span>
+              </div>
+              <div class="node slot-b">
+                <span class="node-kind">Target Group</span>
+                <span class="node-name">learning-tg-b</span>
+              </div>
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <div class="ownership">
+      <span class="tag">关键</span>
+      <strong>ALB / Target Group 的配置你自己动手建，但发布期间的 Listener 权重和 Target 注册，是 ECS 的 deployment controller 全权接管的</strong> —— 你在 Update service 里选了新 revision 之后，接下来 Rule 权重从 <code>100/0</code> 走到 <code>10/90</code> 再到 <code>0/100</code>，全是 ECS 自己在改，不需要（也不应该）手动去 ALB 那边调。
+    </div>
+
+    <p class="section-sub" style="margin-top:2.2rem">Service 本身只是一份<strong style="color:var(--ink)">声明式配置</strong>（写着"该管哪条 Rule、用哪个角色"），它自己不会去改 ALB——真正动手的是 ECS 控制面里的后台逻辑，借着你给的 IAM 角色去执行：</p>
+
+    <div class="chain-scroll">
+      <div class="chain">
+        <div class="chain-step">
+          <span class="step-num">1</span>
+          <span class="step-who">你</span>
+          <span class="step-title">触发 <code>update-service</code></span>
+          <p>控制台点 Update，或者 CLI 调用——只是告诉 ECS "该切到哪个 Task Definition revision 了"</p>
+        </div>
+        <div class="chain-arrow">→</div>
+        <div class="chain-step">
+          <span class="step-num">2</span>
+          <span class="step-who">Service（声明式配置）</span>
+          <span class="step-title">只是记录该管哪条 Rule、用哪个角色</span>
+          <p>Service 定义里的 <code>productionListenerRule</code>、<code>testListenerRule</code>、<code>roleArn</code> 都只是配置字段，Service 这个资源本身不执行任何动作</p>
+        </div>
+        <div class="chain-arrow">→</div>
+        <div class="chain-step who-alb">
+          <span class="step-num">3</span>
+          <span class="step-who">ECS deployment controller</span>
+          <span class="step-title">后台按 canary 节奏决策</span>
+          <p>AWS 后台运行的控制逻辑，按你配的 canary percent / bake time 时间表，决定"现在该把权重改成多少"</p>
+        </div>
+        <div class="chain-arrow">→</div>
+        <div class="chain-step who-alb">
+          <span class="step-num">4</span>
+          <span class="step-who">借用 roleArn</span>
+          <span class="step-title">调用 <code>elbv2:ModifyRule</code></span>
+          <p>用 Service 里配的那个角色（<code>learning-go-canary-esc-role</code>）的身份去调 ELB API，真正改写 ALB Rule 里两个 Target Group 的转发权重——不是用你自己的身份，也不是 Service 资源自己"跑"起来去做</p>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <section>
+    <div class="section-head">
+      <span class="section-num">02</span>
+      <h2>"注册进 Target Group" 具体是谁做了什么</h2>
+    </div>
+    <p class="section-sub">这四步是任务从"刚启动"到"能真正接住流量"必须经过的关联过程——注意"注册"这个动作既不是任务自己发起的，也不是你手动去 ALB 控制台点的。</p>
+
+    <div class="chain-scroll">
+      <div class="chain">
+        <div class="chain-step">
+          <span class="step-num">1</span>
+          <span class="step-who">Fargate</span>
+          <span class="step-title">任务启动，分配 ENI</span>
+          <p><code>awsvpc</code> 网络模式下，每个任务开机时会拿到一张独立网卡和私有 IP，比如 <code>10.0.4.208</code>。这一步任务只是"活了"，跟 ALB 还没有任何关系</p>
+        </div>
+        <div class="chain-arrow">→</div>
+        <div class="chain-step">
+          <span class="step-num">2</span>
+          <span class="step-who">ECS 控制面</span>
+          <span class="step-title">读 Service 的 loadBalancers 配置</span>
+          <p>Service 定义里写死了 <code>containerName: http-echo</code>、<code>containerPort: 5678</code> 该挂到哪个 Target Group——发布期间新任务固定挂到 <code>alternateTargetGroupArn</code>（这次是 tg-b）</p>
+        </div>
+        <div class="chain-arrow">→</div>
+        <div class="chain-step who-alb">
+          <span class="step-num">3</span>
+          <span class="step-who">ECS → ELB API</span>
+          <span class="step-title">调用 RegisterTargets</span>
+          <p>ECS 代你调用 <code>elbv2:RegisterTargets(target-group, ip:port)</code>——这就是事件日志里 "registered 1 targets" 那条的真实来源，全程没人手动点过 ALB 控制台</p>
+        </div>
+        <div class="chain-arrow">→</div>
+        <div class="chain-step who-alb">
+          <span class="step-num">4</span>
+          <span class="step-who">ALB</span>
+          <span class="step-title">健康检查，转正</span>
+          <p>Target Group 按自己配置的健康检查（path <code>/</code>，端口 5678）反复探测这个 IP，状态从 <code>initial</code> 变成 <code>healthy</code> 后，Listener Rule 才会真的把流量转发过去</p>
+        </div>
+      </div>
+    </div>
+
+    <div class="reg-note">
+      <span class="tag">why tg-b</span>
+      为什么这次新任务注册进的是 <strong>tg-b</strong> 不是 <strong>tg-a</strong>？——当前生产流量在哪个 Target Group（这次是 <code>tg-a</code>），ECS 就把新版本任务塞进另一个当"候选槽位"（这次是 <code>tg-b</code>，即 <code>alternateTargetGroupArn</code>）。等这次发布彻底切完，两个槽位的角色会对调：<strong>下一次发布，新任务反过来会注册进 tg-a</strong>。任务停止时是同样的反向过程——ECS 调用 <code>DeregisterTargets</code>，ALB 再给一段 connection draining 时间（Target Group 的 Deregistration delay，你建的时候默认是 300 秒）才彻底摘掉。
+    </div>
+  </section>
+
+  <section>
+    <div class="section-head">
+      <span class="section-num">03</span>
+      <h2>一个请求进来，怎么被分到具体某个 Task</h2>
+    </div>
+    <p class="section-sub">分两层决策，橙色这一层管"灰度比例"，灰色这一层跟版本无关，只是普通负载均衡。</p>
+
+    <div class="chain-scroll">
+      <div class="funnel">
+
+        <div class="funnel-request">
+          <div class="node">
+            <span class="node-kind">Request</span>
+            <span class="node-name">进来的请求 → 命中 production Rule</span>
+          </div>
+        </div>
+
+        <div class="funnel-zone">
+          <div class="ln weighted" style="left:50%;top:0;width:1px;height:45%;transform:translateX(-50%)"></div>
+          <div class="ln weighted" style="left:25%;right:25%;top:45%;height:1px"></div>
+          <div class="ln weighted" style="left:25%;top:45%;width:1px;height:55%;transform:translateX(-50%)"></div>
+          <div class="ln weighted" style="left:75%;top:45%;width:1px;height:55%;transform:translateX(-50%)"></div>
+          <span class="pct" style="left:25%;top:52%">90%</span>
+          <span class="pct" style="left:75%;top:52%">10%</span>
+        </div>
+
+        <div class="funnel-group a">
+          <div class="node">
+            <span class="node-kind">Target Group（第一层：按权重抽签）</span>
+            <span class="node-name">learning-tg-a</span>
+          </div>
+        </div>
+        <div class="funnel-group b">
+          <div class="node">
+            <span class="node-kind">Target Group（第一层：按权重抽签）</span>
+            <span class="node-name">learning-tg-b</span>
+          </div>
+        </div>
+
+        <div class="funnel-zone">
+          <div class="ln" style="left:25%;top:0;width:1px;height:40%;transform:translateX(-50%)"></div>
+          <div class="ln" style="left:12.5%;right:62.5%;top:40%;height:1px"></div>
+          <div class="ln" style="left:12.5%;top:40%;width:1px;height:60%;transform:translateX(-50%)"></div>
+          <div class="ln" style="left:37.5%;top:40%;width:1px;height:60%;transform:translateX(-50%)"></div>
+          <span class="rr-label" style="left:25%;top:44%">轮询，均等</span>
+
+          <div class="ln" style="left:75%;top:0;width:1px;height:40%;transform:translateX(-50%)"></div>
+          <div class="ln" style="left:62.5%;right:12.5%;top:40%;height:1px"></div>
+          <div class="ln" style="left:62.5%;top:40%;width:1px;height:60%;transform:translateX(-50%)"></div>
+          <div class="ln" style="left:87.5%;top:40%;width:1px;height:60%;transform:translateX(-50%)"></div>
+          <span class="rr-label" style="left:75%;top:44%">轮询，均等</span>
+        </div>
+
+        <div class="funnel-task"><div class="node"><span class="node-kind">Task（第二层：健康池内轮询）</span><span class="node-name">10.0.3.30</span></div></div>
+        <div class="funnel-task"><div class="node"><span class="node-kind">Task</span><span class="node-name">10.0.4.11</span></div></div>
+        <div class="funnel-task"><div class="node"><span class="node-kind">Task</span><span class="node-name">10.0.2.7</span></div></div>
+        <div class="funnel-task"><div class="node"><span class="node-kind">Task</span><span class="node-name">10.0.4.208</span></div></div>
+
+      </div>
+    </div>
+
+    <div class="funnel-caption">
+      <div class="cap-card tier1">
+        <span class="cap-tag">第一层 · Listener Rule</span>
+        每个请求进来，按 Rule 里配的权重（<code style="font-family:var(--font-display)">tg-a 90% / tg-b 10%</code>）做一次加权抽签，决定这次请求丢给哪个 Target Group。<strong style="color:var(--ink)">灰度百分比只发生在这一层</strong>——量大了之后请求数趋近这个比例，单次请求不是精确切分的。
+      </div>
+      <div class="cap-card tier2">
+        <span class="cap-tag">第二层 · Target Group 内部</span>
+        确定丢给哪个 Target Group 后，ALB 只在这个组里<strong style="color:var(--ink)">健康</strong>的 Task 之间做普通负载均衡（默认轮询），挑一个转发过去。<strong style="color:var(--ink)">这一层不区分版本</strong>，纯粹是"组内谁健康就转给谁"。
+      </div>
+    </div>
+  </section>
+
+  <section>
+    <div class="section-head">
+      <span class="section-num">04</span>
+      <h2>真实交互 — v1 → v2 那次灰度发布做了什么</h2>
+    </div>
+    <p class="section-sub">下面是 <code>learning-go-canary-service</code> 这次从 <code>:1</code>(v1) 切到 <code>:2</code>(v2) 部署（<code>ecs-svc/4221886...</code>）的真实事件时间线，时间取自 <code>describe-services</code> 的 events。</p>
+
+    <div class="timeline-scroll">
+      <div class="timeline">
+
+        <div class="tl-row start">
+          <div class="tl-time">11:54:48</div>
+          <div class="tl-spine"><div class="tl-dot"></div></div>
+          <div class="tl-body">
+            <div class="tl-label">Service 收到 <code>update-service --task-definition :2</code><span class="stage-pill">Scale up</span></div>
+            <div class="tl-detail">ECS 开始按 CANARY 策略新建候选 Task Set，目标 revision <code>4221886289339130385</code></div>
+          </div>
+        </div>
+
+        <div class="tl-row start">
+          <div class="tl-time">11:55:03</div>
+          <div class="tl-spine"><div class="tl-dot"></div></div>
+          <div class="tl-body">
+            <div class="tl-label">启动第 1 个 v2 任务</div>
+          </div>
+        </div>
+
+        <div class="tl-row register">
+          <div class="tl-time">11:55:35</div>
+          <div class="tl-spine"><div class="tl-dot"></div></div>
+          <div class="tl-body">
+            <div class="tl-label">注册进 <code>learning-tg-b</code></div>
+            <div class="tl-detail">此时权重仍是 tg-a: 100% / tg-b: 0%，新任务还不接生产流量，只是先"入列"</div>
+          </div>
+        </div>
+
+        <div class="tl-row start">
+          <div class="tl-time">11:55:45</div>
+          <div class="tl-spine"><div class="tl-dot"></div></div>
+          <div class="tl-body"><div class="tl-label">启动第 2 个 v2 任务</div></div>
+        </div>
+
+        <div class="tl-row register">
+          <div class="tl-time">11:56:16</div>
+          <div class="tl-spine"><div class="tl-dot"></div></div>
+          <div class="tl-body"><div class="tl-label">注册进 <code>learning-tg-b</code></div></div>
+        </div>
+
+        <div class="tl-row incident">
+          <div class="tl-time">11:56:27 – 11:59:11</div>
+          <div class="tl-spine"><div class="tl-dot"></div></div>
+          <div class="tl-body">
+            <div class="tl-label">插曲：一个任务健康检查失败，被自动替换</div>
+            <div class="tl-detail">原因 <code>Target is in an Availability Zone that is not enabled for the load balancer</code> —— 当时 ALB 只在 2 个可用区，Service 子网跨 3 个可用区。ECS 自己检测到、停任务、重起、注销、补一个新的，全程无需人工介入</div>
+          </div>
+        </div>
+
+        <div class="tl-row shift">
+          <div class="tl-time">~11:59:57</div>
+          <div class="tl-spine"><div class="tl-dot"></div></div>
+          <div class="tl-body">
+            <div class="tl-label">Canary 观察期（3 分钟）结束，权重推进<span class="stage-pill">10% → 100%</span></div>
+            <div class="tl-detail">production rule 权重从 tg-a 90% / tg-b 10% 一次性推到 tg-a 0% / tg-b 100%</div>
+          </div>
+        </div>
+
+        <div class="tl-row drain">
+          <div class="tl-time">12:08:39</div>
+          <div class="tl-spine"><div class="tl-dot"></div></div>
+          <div class="tl-body">
+            <div class="tl-label">最终 bake time（5 分钟）结束，停掉 2 个旧 v1 任务</div>
+          </div>
+        </div>
+
+        <div class="tl-row drain">
+          <div class="tl-time">12:08:51</div>
+          <div class="tl-spine"><div class="tl-dot"></div></div>
+          <div class="tl-body">
+            <div class="tl-label">从 <code>learning-tg-a</code> 注销，开始 draining connections</div>
+            <div class="tl-detail">deployment 状态收敛为 COMPLETED，v2 成为唯一在跑的版本</div>
+          </div>
+        </div>
+
+      </div>
+    </div>
+
+    <div class="weights">
+      <div class="weight-card">
+        <h3>production rule 权重推进</h3>
+        <div class="wbar-row"><span class="wbar-label">起始</span><div class="wbar-track"><div class="wbar-fill v1" style="width:100%"></div></div><span class="wbar-pct">v1 100%</span></div>
+        <div class="wbar-row"><span class="wbar-label">canary</span><div class="wbar-track"><div class="wbar-fill v1" style="width:90%"></div><div class="wbar-fill v2" style="width:10%;margin-top:-8px;float:right"></div></div><span class="wbar-pct">v2 10%</span></div>
+        <div class="wbar-row"><span class="wbar-label">切完</span><div class="wbar-track"><div class="wbar-fill v2" style="width:100%"></div></div><span class="wbar-pct">v2 100%</span></div>
+      </div>
+      <div class="weight-card">
+        <h3>test rule（<code style="font-family:var(--font-display)">/__green-test*</code>）权重</h3>
+        <div class="wbar-row"><span class="wbar-label">全程</span><div class="wbar-track"><div class="wbar-fill v2" style="width:100%"></div></div><span class="wbar-pct">v2 100%</span></div>
+        <div class="tl-detail" style="margin-top:0.4rem">不跟着 canary 节奏走，从一开始就整体切给候选版本，专门用来提前探测，跟生产流量的渐进切换是两回事</div>
+      </div>
+    </div>
+  </section>
+
+  <footer>
+    数据来源：<code>aws ecs describe-services</code> / <code>aws elbv2 describe-target-health</code> / <code>aws elbv2 describe-rules</code>，us-west-2，2026-07-22 操练记录。
+  </footer>
+
+</div>
